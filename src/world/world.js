@@ -46,14 +46,18 @@ export class World {
     }
 
     setPosition(entityId, position) {
+        this.setPositionXY(entityId, position.x, position.y);
+    }
+
+    setPositionXY(entityId, x, y) {
         const entity = this.entities.get(entityId);
 
         if (!entity) {
             throw new Error(`Unknown entity: ${entityId}`);
         }
 
-        entity.position.x = position.x;
-        entity.position.y = position.y;
+        entity.position.x = x;
+        entity.position.y = y;
 
         this.spatial.upsert(
             entity.id,
