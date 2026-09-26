@@ -1,12 +1,14 @@
 {
   "name": "world-core",
-  "version": "0.1.0",
-  "description": "",
+  "version": "0.2.0",
+  "description": "Scalable 2D world, navigation and movement simulation core",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "test": "node --test",
+    "bench": "node benchmark/scalability.js"
   },
-  "keywords": [],
+  "keywords": ["simulation", "world", "navigation", "pathfinding"],
   "author": "",
   "license": "ISC",
   "type": "module"
