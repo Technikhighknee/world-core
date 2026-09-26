@@ -4,17 +4,36 @@ import { StaticSpatialIndex } from "./static-spatial-index.js";
 import { distance } from "./vec2.js";
 
 function mobilityCacheKey(mobility) {
-    const multipliers = Object.entries(mobility.surfaceMultipliers ?? {})
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([surface, multiplier]) => `${surface}:${multiplier}`)
-        .join(",");
+    if (mobility.profileId) {
+        return mobility.profileId;
+    }
 
-    return `${mobility.speed}|${multipliers}`;
+    if (mobility.cacheKey) {
+        return mobility.cacheKey;
+    }
+
+    const multipliers = mobility.surfaceMultipliers ?? {};
+    const keys = Object.keys(multipliers).sort();
+
+    let key = `speed:${mobility.speed}`;
+
+    for (const surface of keys) {
+        key += `|${surface}:${multipliers[surface]}`;
+    }
+
+    return key;
 }
 
 function maxTravelSpeed(mobility) {
-    const multipliers = Object.values(mobility.surfaceMultipliers ?? {});
-    const maxMultiplier = Math.max(1, ...multipliers.filter(value => value > 0));
+    const multipliers = mobility.surfaceMultipliers ?? {};
+    let maxMultiplier = 1;
+
+    for (const value of Object.values(multipliers)) {
+        if (value > maxMultiplier) {
+            maxMultiplier = value;
+        }
+    }
+
     return mobility.speed * maxMultiplier;
 }
 
@@ -117,6 +136,7 @@ export class Navigation {
         }
 
         const padding = width / 2;
+
         for (let i = 1; i < points.length; i++) {
             const a = points[i - 1];
             const b = points[i];
@@ -169,6 +189,7 @@ export class Navigation {
                     if (!node) continue;
 
                     const d = distance(position, node.position);
+
                     if (!best || d < best.distance) {
                         best = { node, distance: d };
                     }
@@ -181,9 +202,13 @@ export class Navigation {
         }
 
         let best = null;
+
         for (const node of this.nodes.values()) {
             const d = distance(position, node.position);
-            if (!best || d < best.distance) best = { node, distance: d };
+
+            if (!best || d < best.distance) {
+                best = { node, distance: d };
+            }
         }
 
         return best;
@@ -237,7 +262,9 @@ export class Navigation {
             };
         }
 
-        const cacheKey = `${this.graphVersion}|${startNodeId}|${destinationNodeId}|${mobilityCacheKey(mobility)}`;
+        const cacheKey =
+            `${this.graphVersion}|${startNodeId}|${destinationNodeId}|${mobilityCacheKey(mobility)}`;
+
         const cached = this.routeCache.get(cacheKey);
 
         if (cached) {
@@ -266,7 +293,8 @@ export class Navigation {
             if (current === destinationNodeId) break;
 
             const currentNode = this.nodes.get(current);
-            const expectedPriority = currentCost +
+            const expectedPriority =
+                currentCost +
                 distance(currentNode.position, destination.position) / fastestPossibleSpeed;
 
             if (currentEntry.priority > expectedPriority + 1e-9) {
