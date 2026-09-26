@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { mobilityProfile } from "../src/world/mobility-profiles.js";
 import { Navigation } from "../src/world/navigation.js";
 import { startJourney, stopJourney } from "../src/world/movement.js";
 import { stepSimulation } from "../src/world/simulation.js";
@@ -76,6 +77,44 @@ test("stopJourney can immediately remove an entity from the moving set", () => {
     assert.equal(world.movingEntities.has("walker"), false);
 });
 
+test("movement commits position to the spatial index once per entity tick", () => {
+    const world = new World({ spatialCellSize: 5 });
+    const navigation = new Navigation({ spatialCellSize: 5 });
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+    navigation.addRoad({
+        id: "waypoint-heavy",
+        from: "a",
+        to: "b",
+        shape: Array.from({ length: 99 }, (_, index) => ({
+            x: index + 1,
+            y: index % 2 === 0 ? 0.2 : -0.2,
+        })),
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 200 },
+    });
+
+    let commits = 0;
+    const originalSetPositionXY = world.setPositionXY.bind(world);
+
+    world.setPositionXY = (...args) => {
+        commits++;
+        return originalSetPositionXY(...args);
+    };
+
+    startJourney(world, navigation, "walker", "b");
+    stepSimulation(world, navigation, 1);
+
+    assert.equal(commits, 1);
+    assert.equal(world.getEntity("walker").journey, null);
+    assert.deepEqual(world.getEntity("walker").position, { x: 100, y: 0 });
+});
+
 test("navigation uses indexed node and road lookups", () => {
     const navigation = new Navigation({ spatialCellSize: 10 });
     navigation.addNode({ id: "a", x: 0, y: 0 });
@@ -108,6 +147,7 @@ test("A* finds the faster route and route results are cached", () => {
     navigation.addRoad({ id: "dc", from: "d", to: "c", surface: "street" });
 
     const mobility = {
+        profileId: "test-pedestrian",
         speed: 1,
         surfaceMultipliers: {
             mud: 0.25,
@@ -116,11 +156,23 @@ test("A* finds the faster route and route results are cached", () => {
     };
 
     const first = navigation.findRoute("a", "c", mobility);
-    const second = navigation.findRoute("a", "c", mobility);
+    const second = navigation.findRoute("a", "c", {
+        ...mobility,
+        surfaceMultipliers: { ...mobility.surfaceMultipliers },
+    });
 
     assert.deepEqual(first.legs.map(leg => leg.roadId), ["ad", "dc"]);
     assert.strictEqual(first, second);
     assert.equal(navigation.routeCache.size, 1);
+});
+
+test("built-in mobility profiles expose stable cache identities", () => {
+    const pedestrian = mobilityProfile("pedestrian");
+    const cloned = structuredClone(pedestrian);
+
+    assert.equal(pedestrian.profileId, "pedestrian");
+    assert.equal(cloned.profileId, "pedestrian");
+    assert.equal(pedestrian.speed, cloned.speed);
 });
 
 test("nearby queries ignore thousands of far-away entities", () => {
