@@ -1,6 +1,5 @@
-import { add, distance, mul, normalize, sub } from "./vec2.js";
-
 const EPSILON = 0.000001;
+const EPSILON_SQUARED = EPSILON * EPSILON;
 
 export function startJourney(world, navigation, entityId, destinationNodeId) {
     const entity = world.getEntity(entityId);
@@ -69,6 +68,9 @@ function finishJourney(world, entity) {
 
 function moveEntity(world, navigation, entity, deltaSeconds) {
     let remainingTime = deltaSeconds;
+    let x = entity.position.x;
+    let y = entity.position.y;
+    let moved = false;
 
     while (remainingTime > EPSILON && entity.journey) {
         const journey = entity.journey;
@@ -76,18 +78,21 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
 
         if (!leg) {
             finishJourney(world, entity);
-            return;
+            break;
         }
 
         const road = navigation.roads.get(leg.roadId);
+
         if (!road) {
             finishJourney(world, entity);
-            return;
+            break;
         }
 
-        const surfaceMultiplier = entity.mobility.surfaceMultipliers?.[road.surface] ?? 1;
+        const surfaceMultiplier =
+            entity.mobility.surfaceMultipliers?.[road.surface] ?? 1;
         const speed = entity.mobility.speed * surfaceMultiplier;
-        if (!(speed > 0)) return;
+
+        if (!(speed > 0)) break;
 
         const target = leg.points[journey.pointIndex];
 
@@ -102,27 +107,39 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             continue;
         }
 
-        const distanceToTarget = distance(entity.position, target);
+        const dx = target.x - x;
+        const dy = target.y - y;
+        const distanceSquared = dx * dx + dy * dy;
 
-        if (distanceToTarget <= EPSILON) {
+        if (distanceSquared <= EPSILON_SQUARED) {
+            x = target.x;
+            y = target.y;
             journey.pointIndex++;
             continue;
         }
 
+        const distanceToTarget = Math.sqrt(distanceSquared);
         const secondsToTarget = distanceToTarget / speed;
 
         if (secondsToTarget <= remainingTime) {
-            world.setPosition(entity.id, target);
+            x = target.x;
+            y = target.y;
+            moved = true;
             remainingTime -= secondsToTarget;
             journey.pointIndex++;
             continue;
         }
 
-        const direction = normalize(sub(target, entity.position));
         const travelled = speed * remainingTime;
-        const nextPosition = add(entity.position, mul(direction, travelled));
+        const scale = travelled / distanceToTarget;
 
-        world.setPosition(entity.id, nextPosition);
+        x += dx * scale;
+        y += dy * scale;
+        moved = true;
         remainingTime = 0;
+    }
+
+    if (moved) {
+        world.setPositionXY(entity.id, x, y);
     }
 }

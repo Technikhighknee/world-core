@@ -1,35 +1,151 @@
 import { performance } from "node:perf_hooks";
 
+import { mobilityProfile } from "../src/world/mobility-profiles.js";
 import { Navigation } from "../src/world/navigation.js";
 import { startJourney } from "../src/world/movement.js";
 import { stepSimulation } from "../src/world/simulation.js";
 import { World } from "../src/world/world.js";
 
 const cityCount = 20;
+const gridSize = 20;
+const nodeSpacing = 50;
 const entitiesPerCity = 2500;
 const moversPerCity = 250;
 const ticks = 100;
 const citySpacing = 10000;
+const routeQueries = 2000;
 
+const pedestrian = mobilityProfile("pedestrian");
 const world = new World({ spatialCellSize: 10 });
 const navigation = new Navigation({
-    spatialCellSize: 25,
-    routeCacheSize: 10000,
+    spatialCellSize: 50,
+    routeCacheSize: 20000,
 });
+
+function nodeId(city, x, y) {
+    return `city-${city}-node-${x}-${y}`;
+}
+
+function addCityGraph(city) {
+    const originX = city * citySpacing;
+
+    for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+            navigation.addNode({
+                id: nodeId(city, x, y),
+                x: originX + x * nodeSpacing,
+                y: y * nodeSpacing,
+            });
+        }
+    }
+
+    for (let y = 0; y < gridSize; y++) {
+        for (let x = 0; x < gridSize; x++) {
+            if (x + 1 < gridSize) {
+                const from = nodeId(city, x, y);
+                const to = nodeId(city, x + 1, y);
+                const baseX = originX + x * nodeSpacing;
+                const baseY = y * nodeSpacing;
+
+                navigation.addRoad({
+                    id: `city-${city}-h-${x}-${y}`,
+                    from,
+                    to,
+                    width: 5,
+                    surface: (x + y) % 7 === 0 ? "mud" : "street",
+                    shape: [
+                        { x: baseX + 12.5, y: baseY + 1.5 },
+                        { x: baseX + 25, y: baseY - 1.5 },
+                        { x: baseX + 37.5, y: baseY + 1 },
+                    ],
+                });
+            }
+
+            if (y + 1 < gridSize) {
+                const from = nodeId(city, x, y);
+                const to = nodeId(city, x, y + 1);
+                const baseX = originX + x * nodeSpacing;
+                const baseY = y * nodeSpacing;
+
+                navigation.addRoad({
+                    id: `city-${city}-v-${x}-${y}`,
+                    from,
+                    to,
+                    width: 4,
+                    surface: (x * 3 + y) % 11 === 0 ? "mud" : "street",
+                    shape: [
+                        { x: baseX + 1.5, y: baseY + 12.5 },
+                        { x: baseX - 1, y: baseY + 25 },
+                        { x: baseX + 1, y: baseY + 37.5 },
+                    ],
+                });
+            }
+        }
+    }
+}
+
+function createRouteQueries(count) {
+    let state = 0x12345678;
+    const queries = [];
+    const seen = new Set();
+
+    function nextInt(max) {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        return state % max;
+    }
+
+    while (queries.length < count) {
+        const city = nextInt(cityCount);
+        const sourceX = nextInt(gridSize);
+        const sourceY = nextInt(gridSize);
+        const destinationX = nextInt(gridSize);
+        const destinationY = nextInt(gridSize);
+
+        if (sourceX === destinationX && sourceY === destinationY) continue;
+
+        const key =
+            `${city}:${sourceX}:${sourceY}:${destinationX}:${destinationY}`;
+
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        queries.push({
+            from: nodeId(city, sourceX, sourceY),
+            to: nodeId(city, destinationX, destinationY),
+        });
+    }
+
+    return queries;
+}
+
+const buildStarted = performance.now();
+
+for (let city = 0; city < cityCount; city++) {
+    addCityGraph(city);
+}
+
+const graphBuildElapsed = performance.now() - buildStarted;
+const queries = createRouteQueries(routeQueries);
+
+navigation.routeCache.clear();
+
+const coldRoutingStarted = performance.now();
+
+for (const query of queries) {
+    navigation.findRoute(query.from, query.to, pedestrian);
+}
+
+const coldRoutingElapsed = performance.now() - coldRoutingStarted;
+const warmRoutingStarted = performance.now();
+
+for (const query of queries) {
+    navigation.findRoute(query.from, query.to, pedestrian);
+}
+
+const warmRoutingElapsed = performance.now() - warmRoutingStarted;
 
 for (let city = 0; city < cityCount; city++) {
     const originX = city * citySpacing;
-    const startId = `city-${city}-start`;
-    const endId = `city-${city}-end`;
-
-    navigation.addNode({ id: startId, x: originX, y: 0 });
-    navigation.addNode({ id: endId, x: originX + 1000, y: 0 });
-    navigation.addRoad({
-        id: `city-${city}-road`,
-        from: startId,
-        to: endId,
-        width: 6,
-    });
 
     for (let i = 0; i < entitiesPerCity; i++) {
         const entityId = `city-${city}-person-${i}`;
@@ -39,38 +155,51 @@ for (let city = 0; city < cityCount; city++) {
             id: entityId,
             kind: "person",
             position: moving
-                ? { x: originX, y: 0 }
+                ? {
+                    x: originX,
+                    y: 0,
+                }
                 : {
                     x: originX + 100 + (i % 100),
-                    y: 50 + Math.floor(i / 100),
+                    y: 100 + Math.floor(i / 100),
                 },
-            mobility: { speed: 1.4 },
+            mobility: pedestrian,
         });
 
         if (moving) {
-            startJourney(world, navigation, entityId, endId);
+            startJourney(
+                world,
+                navigation,
+                entityId,
+                nodeId(city, gridSize - 1, gridSize - 1),
+            );
         }
     }
 }
 
+console.log(`cities: ${cityCount}`);
+console.log(`nodes: ${navigation.nodes.size.toLocaleString()}`);
+console.log(`roads: ${navigation.roads.size.toLocaleString()}`);
 console.log(`entities: ${world.entities.size.toLocaleString()}`);
 console.log(`active movers: ${world.movingEntities.size.toLocaleString()}`);
-console.log(`cities: ${cityCount}`);
-console.log(`ticks: ${ticks}`);
+console.log(`graph build: ${graphBuildElapsed.toFixed(2)} ms`);
+console.log(`unique cold route queries (${queries.length}): ${coldRoutingElapsed.toFixed(2)} ms`);
+console.log(`same warm route queries (${queries.length}): ${warmRoutingElapsed.toFixed(2)} ms`);
 
-const started = performance.now();
+const movementStarted = performance.now();
 
 for (let i = 0; i < ticks; i++) {
     stepSimulation(world, navigation, 1);
 }
 
-const elapsed = performance.now() - started;
+const movementElapsed = performance.now() - movementStarted;
 
-console.log(`movement total: ${elapsed.toFixed(2)} ms`);
-console.log(`movement per tick: ${(elapsed / ticks).toFixed(3)} ms`);
+console.log(`movement ticks: ${ticks}`);
+console.log(`movement total: ${movementElapsed.toFixed(2)} ms`);
+console.log(`movement per tick: ${(movementElapsed / ticks).toFixed(3)} ms`);
 console.log(`active movers after run: ${world.movingEntities.size.toLocaleString()}`);
 
-const thiefPosition = { x: 100, y: 50 };
+const thiefPosition = { x: 100, y: 100 };
 const queryStarted = performance.now();
 let nearbyCount = 0;
 
