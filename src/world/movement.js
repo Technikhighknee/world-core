@@ -1,6 +1,56 @@
 const EPSILON = 0.000001;
 const EPSILON_SQUARED = EPSILON * EPSILON;
 
+function initialPointIndex(road, leg) {
+    if (leg.startSegmentIndex != null) {
+        return leg.reversed
+            ? leg.startSegmentIndex
+            : leg.startSegmentIndex + 1;
+    }
+
+    return leg.reversed
+        ? road.points.length - 2
+        : 1;
+}
+
+function nextPointIndex(index, reversed) {
+    return reversed ? index - 1 : index + 1;
+}
+
+function pointIndexIsDone(index, road, reversed) {
+    return reversed
+        ? index < 0
+        : index >= road.points.length;
+}
+
+function beginJourney(world, navigation, entity, destinationNodeId, planned) {
+    const route = planned.route;
+
+    if (route.legs.length === 0 && !planned.entryPoint) {
+        entity.journey = null;
+        world.unmarkMoving(entity.id);
+        return true;
+    }
+
+    const firstLeg = route.legs[0];
+    const firstRoad = firstLeg
+        ? navigation.roads.get(firstLeg.roadId)
+        : null;
+
+    entity.journey = {
+        destinationNodeId,
+        route,
+        entryPoint: planned.entryPoint,
+        legIndex: 0,
+        pointIndex: firstRoad
+            ? initialPointIndex(firstRoad, firstLeg)
+            : 0,
+    };
+
+    world.markMoving(entity.id);
+    return true;
+}
+
 export function startJourney(world, navigation, entityId, destinationNodeId) {
     const entity = world.getEntity(entityId);
 
@@ -12,35 +62,19 @@ export function startJourney(world, navigation, entityId, destinationNodeId) {
         throw new Error(`Entity ${entityId} cannot move`);
     }
 
-    const startNode = navigation.nodeAt(entity.position, 0.1);
-
-    if (!startNode) {
-        throw new Error(`Entity ${entityId} is not currently at a navigation node`);
-    }
-
-    const route = navigation.findRoute(
-        startNode.id,
+    const planned = navigation.findRouteFromPosition(
+        entity.position,
         destinationNodeId,
         entity.mobility,
     );
 
-    if (!route) return false;
+    if (!planned) return false;
 
-    if (route.legs.length === 0) {
-        entity.journey = null;
-        world.unmarkMoving(entity.id);
-        return true;
-    }
+    return beginJourney(world, navigation, entity, destinationNodeId, planned);
+}
 
-    entity.journey = {
-        destinationNodeId,
-        route,
-        legIndex: 0,
-        pointIndex: 1,
-    };
-
-    world.markMoving(entity.id);
-    return true;
+export function rerouteJourney(world, navigation, entityId, destinationNodeId) {
+    return startJourney(world, navigation, entityId, destinationNodeId);
 }
 
 export function stopJourney(entity, world = null) {
@@ -49,21 +83,76 @@ export function stopJourney(entity, world = null) {
 }
 
 export function updateMovement(world, navigation, deltaSeconds) {
-    for (const entityId of world.movingEntities) {
-        const entity = world.getEntity(entityId);
+    const reclassify = [];
 
-        if (!entity || !entity.journey) {
-            world.unmarkMoving(entityId);
-            continue;
-        }
+    world.forEachDueMovementBatch(
+        deltaSeconds,
+        (entityIds, elapsedSeconds) => {
+            for (const entityId of entityIds) {
+                const entity = world.getEntity(entityId);
 
-        moveEntity(world, navigation, entity, deltaSeconds);
+                if (!entity || !entity.journey) {
+                    world.unmarkMoving(entityId);
+                    continue;
+                }
+
+                moveEntity(world, navigation, entity, elapsedSeconds);
+
+                if (entity.journey) {
+                    reclassify.push(entityId);
+                }
+            }
+        },
+    );
+
+    for (const entityId of reclassify) {
+        world.refreshEntityMovementLod(entityId);
     }
 }
 
 function finishJourney(world, entity) {
     entity.journey = null;
     world.unmarkMoving(entity.id);
+}
+
+function moveToward(x, y, targetX, targetY, speed, remainingTime) {
+    const dx = targetX - x;
+    const dy = targetY - y;
+    const distanceSquared = dx * dx + dy * dy;
+
+    if (distanceSquared <= EPSILON_SQUARED) {
+        return {
+            x: targetX,
+            y: targetY,
+            remainingTime,
+            reached: true,
+            moved: false,
+        };
+    }
+
+    const distanceToTarget = Math.sqrt(distanceSquared);
+    const secondsToTarget = distanceToTarget / speed;
+
+    if (secondsToTarget <= remainingTime) {
+        return {
+            x: targetX,
+            y: targetY,
+            remainingTime: remainingTime - secondsToTarget,
+            reached: true,
+            moved: true,
+        };
+    }
+
+    const travelled = speed * remainingTime;
+    const scale = travelled / distanceToTarget;
+
+    return {
+        x: x + dx * scale,
+        y: y + dy * scale,
+        remainingTime: 0,
+        reached: false,
+        moved: true,
+    };
 }
 
 function moveEntity(world, navigation, entity, deltaSeconds) {
@@ -74,6 +163,31 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
 
     while (remainingTime > EPSILON && entity.journey) {
         const journey = entity.journey;
+
+        if (journey.entryPoint) {
+            const result = moveToward(
+                x,
+                y,
+                journey.entryPoint.x,
+                journey.entryPoint.y,
+                entity.mobility.speed,
+                remainingTime,
+            );
+
+            x = result.x;
+            y = result.y;
+            remainingTime = result.remainingTime;
+            moved ||= result.moved;
+
+            if (result.reached) {
+                journey.entryPoint = null;
+            } else {
+                break;
+            }
+
+            continue;
+        }
+
         const leg = journey.route.legs[journey.legIndex];
 
         if (!leg) {
@@ -88,55 +202,63 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             break;
         }
 
+        if (pointIndexIsDone(journey.pointIndex, road, leg.reversed)) {
+            journey.legIndex++;
+
+            const nextLeg = journey.route.legs[journey.legIndex];
+
+            if (!nextLeg) {
+                finishJourney(world, entity);
+                break;
+            }
+
+            const nextRoad = navigation.roads.get(nextLeg.roadId);
+
+            if (!nextRoad) {
+                finishJourney(world, entity);
+                break;
+            }
+
+            journey.pointIndex = initialPointIndex(nextRoad, nextLeg);
+            continue;
+        }
+
         const surfaceMultiplier =
             entity.mobility.surfaceMultipliers?.[road.surface] ?? 1;
         const speed = entity.mobility.speed * surfaceMultiplier;
 
         if (!(speed > 0)) break;
 
-        const target = leg.points[journey.pointIndex];
+        const target = road.points[journey.pointIndex];
 
         if (!target) {
-            journey.legIndex++;
-            journey.pointIndex = 1;
+            finishJourney(world, entity);
+            break;
+        }
 
-            if (journey.legIndex >= journey.route.legs.length) {
-                finishJourney(world, entity);
-            }
+        const result = moveToward(
+            x,
+            y,
+            target.x,
+            target.y,
+            speed,
+            remainingTime,
+        );
 
+        x = result.x;
+        y = result.y;
+        remainingTime = result.remainingTime;
+        moved ||= result.moved;
+
+        if (result.reached) {
+            journey.pointIndex = nextPointIndex(
+                journey.pointIndex,
+                leg.reversed,
+            );
             continue;
         }
 
-        const dx = target.x - x;
-        const dy = target.y - y;
-        const distanceSquared = dx * dx + dy * dy;
-
-        if (distanceSquared <= EPSILON_SQUARED) {
-            x = target.x;
-            y = target.y;
-            journey.pointIndex++;
-            continue;
-        }
-
-        const distanceToTarget = Math.sqrt(distanceSquared);
-        const secondsToTarget = distanceToTarget / speed;
-
-        if (secondsToTarget <= remainingTime) {
-            x = target.x;
-            y = target.y;
-            moved = true;
-            remainingTime -= secondsToTarget;
-            journey.pointIndex++;
-            continue;
-        }
-
-        const travelled = speed * remainingTime;
-        const scale = travelled / distanceToTarget;
-
-        x += dx * scale;
-        y += dy * scale;
-        moved = true;
-        remainingTime = 0;
+        break;
     }
 
     if (moved) {

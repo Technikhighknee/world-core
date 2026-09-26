@@ -3,14 +3,11 @@ import { MinPriorityQueue } from "./priority-queue.js";
 import { StaticSpatialIndex } from "./static-spatial-index.js";
 import { distance } from "./vec2.js";
 
-function mobilityCacheKey(mobility) {
-    if (mobility.profileId) {
-        return mobility.profileId;
-    }
+const EPSILON = 1e-9;
 
-    if (mobility.cacheKey) {
-        return mobility.cacheKey;
-    }
+function mobilityCacheKey(mobility) {
+    if (mobility.profileId) return mobility.profileId;
+    if (mobility.cacheKey) return mobility.cacheKey;
 
     const multipliers = mobility.surfaceMultipliers ?? {};
     const keys = Object.keys(multipliers).sort();
@@ -29,16 +26,23 @@ function maxTravelSpeed(mobility) {
     let maxMultiplier = 1;
 
     for (const value of Object.values(multipliers)) {
-        if (value > maxMultiplier) {
-            maxMultiplier = value;
-        }
+        if (value > maxMultiplier) maxMultiplier = value;
     }
 
     return mobility.speed * maxMultiplier;
 }
 
+function roadSpeed(road, mobility) {
+    const multiplier = mobility.surfaceMultipliers?.[road.surface] ?? 1;
+    return mobility.speed * multiplier;
+}
+
 export class Navigation {
-    constructor({ spatialCellSize = 50, routeCacheSize = 5000 } = {}) {
+    constructor({
+        spatialCellSize = 50,
+        routeCacheSize = 5000,
+        routeCacheMaxLegs = 256,
+    } = {}) {
         this.nodes = new Map();
         this.roads = new Map();
         this.adjacency = new Map();
@@ -47,28 +51,129 @@ export class Navigation {
         this.roadIndex = new StaticSpatialIndex(spatialCellSize);
 
         this.routeCacheSize = routeCacheSize;
+        this.routeCacheMaxLegs = routeCacheMaxLegs;
         this.routeCache = new Map();
-        this.graphVersion = 0;
+        this.routeKeysByRoad = new Map();
+
+        this.componentMembers = new Map();
+        this.nextComponentId = 1;
+
+        this.nodeQueryScratch = new Set();
+        this.roadQueryScratch = new Set();
     }
 
-    #invalidateRoutes() {
-        this.graphVersion++;
-        this.routeCache.clear();
-    }
+    #deleteCachedRoute(key) {
+        const entry = this.routeCache.get(key);
+        if (!entry) return false;
 
-    #cacheRoute(key, route) {
-        if (this.routeCacheSize <= 0) return;
+        this.routeCache.delete(key);
 
-        if (this.routeCache.has(key)) {
-            this.routeCache.delete(key);
+        for (const leg of entry.route.legs) {
+            const keys = this.routeKeysByRoad.get(leg.roadId);
+            if (!keys) continue;
+
+            keys.delete(key);
+            if (keys.size === 0) this.routeKeysByRoad.delete(leg.roadId);
         }
 
-        this.routeCache.set(key, route);
+        return true;
+    }
+
+    #invalidateComponent(componentId) {
+        for (const [key, entry] of this.routeCache) {
+            if (entry.componentId === componentId) {
+                this.#deleteCachedRoute(key);
+            }
+        }
+    }
+
+    #mergeComponents(a, b) {
+        if (a === b) return a;
+
+        const membersA = this.componentMembers.get(a);
+        const membersB = this.componentMembers.get(b);
+
+        if (!membersA || !membersB) {
+            throw new Error("Navigation component bookkeeping is inconsistent");
+        }
+
+        this.#invalidateComponent(a);
+        this.#invalidateComponent(b);
+
+        let keepId = a;
+        let mergeId = b;
+        let keep = membersA;
+        let merge = membersB;
+
+        if (membersB.size > membersA.size) {
+            keepId = b;
+            mergeId = a;
+            keep = membersB;
+            merge = membersA;
+        }
+
+        for (const nodeId of merge) {
+            this.nodes.get(nodeId).componentId = keepId;
+            keep.add(nodeId);
+        }
+
+        this.componentMembers.delete(mergeId);
+        return keepId;
+    }
+
+    #cacheRoute(key, route, componentId) {
+        if (
+            this.routeCacheSize <= 0 ||
+            route.legs.length > this.routeCacheMaxLegs
+        ) {
+            return;
+        }
+
+        if (this.routeCache.has(key)) {
+            this.#deleteCachedRoute(key);
+        }
+
+        const entry = { route, componentId };
+        this.routeCache.set(key, entry);
+
+        for (const leg of route.legs) {
+            let keys = this.routeKeysByRoad.get(leg.roadId);
+
+            if (!keys) {
+                keys = new Set();
+                this.routeKeysByRoad.set(leg.roadId, keys);
+            }
+
+            keys.add(key);
+        }
 
         while (this.routeCache.size > this.routeCacheSize) {
             const oldestKey = this.routeCache.keys().next().value;
-            this.routeCache.delete(oldestKey);
+            this.#deleteCachedRoute(oldestKey);
         }
+    }
+
+    invalidateRoadRoutes(roadId, { mayImprove = true } = {}) {
+        const road = this.roads.get(roadId);
+        if (!road) return;
+
+        if (mayImprove) {
+            const componentId = this.nodes.get(road.from)?.componentId;
+            if (componentId != null) this.#invalidateComponent(componentId);
+            return;
+        }
+
+        const keys = this.routeKeysByRoad.get(roadId);
+        if (!keys) return;
+
+        for (const key of [...keys]) {
+            this.#deleteCachedRoute(key);
+        }
+    }
+
+    invalidateAllRoutes() {
+        this.routeCache.clear();
+        this.routeKeysByRoad.clear();
     }
 
     addNode({ id, x, y }) {
@@ -76,12 +181,17 @@ export class Navigation {
             throw new Error(`Navigation node already exists: ${id}`);
         }
 
-        const node = { id, position: { x, y } };
+        const componentId = this.nextComponentId++;
+        const node = {
+            id,
+            position: { x, y },
+            componentId,
+        };
 
         this.nodes.set(id, node);
         this.adjacency.set(id, []);
+        this.componentMembers.set(componentId, new Set([id]));
         this.nodeIndex.insertPoint(id, node.position);
-        this.#invalidateRoutes();
 
         return node;
     }
@@ -106,6 +216,14 @@ export class Navigation {
             throw new Error(`Road ${id} references unknown nodes`);
         }
 
+        const componentId = start.componentId === end.componentId
+            ? start.componentId
+            : this.#mergeComponents(start.componentId, end.componentId);
+
+        if (start.componentId === end.componentId) {
+            this.#invalidateComponent(componentId);
+        }
+
         const points = [
             { ...start.position },
             ...shape.map(point => ({ ...point })),
@@ -124,12 +242,11 @@ export class Navigation {
         };
 
         this.roads.set(id, road);
-        this.adjacency.get(from).push({ roadId: id, from, to, reversed: false });
+        this.adjacency.get(from).push({ roadId: id, to, reversed: false });
 
         if (bidirectional) {
             this.adjacency.get(to).push({
                 roadId: id,
-                from: to,
                 to: from,
                 reversed: true,
             });
@@ -138,48 +255,66 @@ export class Navigation {
         const padding = width / 2;
 
         for (let i = 1; i < points.length; i++) {
-            const a = points[i - 1];
-            const b = points[i];
-
-            this.roadIndex.insertBounds(
-                id,
-                Math.min(a.x, b.x) - padding,
-                Math.min(a.y, b.y) - padding,
-                Math.max(a.x, b.x) + padding,
-                Math.max(a.y, b.y) + padding,
-            );
+            this.roadIndex.insertSegment(id, points[i - 1], points[i], padding);
         }
 
-        this.#invalidateRoutes();
         return road;
     }
 
+    setRoadSurface(roadId, surface) {
+        const road = this.roads.get(roadId);
+
+        if (!road) {
+            throw new Error(`Unknown road: ${roadId}`);
+        }
+
+        if (road.surface === surface) return false;
+
+        road.surface = surface;
+        this.invalidateRoadRoutes(roadId, { mayImprove: true });
+        return true;
+    }
+
     nodeAt(position, tolerance = 0.01) {
-        const candidates = this.nodeIndex.queryRadius(position, tolerance);
+        const candidates = this.nodeIndex.queryRadiusInto(
+            this.nodeQueryScratch,
+            position,
+            tolerance,
+        );
+
         let best = null;
+        let bestDistance = Infinity;
 
         for (const nodeId of candidates) {
             const node = this.nodes.get(nodeId);
             if (!node) continue;
 
             const d = distance(node.position, position);
-            if (d > tolerance) continue;
 
-            if (!best || d < best.distance) {
-                best = { node, distance: d };
+            if (d <= tolerance && d < bestDistance) {
+                best = node;
+                bestDistance = d;
             }
         }
 
-        return best?.node ?? null;
+        return best;
     }
 
     nearestNode(position) {
+        return this.nearestNodeWithDistance(position)?.node ?? null;
+    }
+
+    nearestNodeWithDistance(position) {
         if (this.nodes.size === 0) return null;
 
         let radius = this.nodeIndex.cellSize;
 
         for (let attempt = 0; attempt < 24; attempt++) {
-            const candidates = this.nodeIndex.queryRadius(position, radius);
+            const candidates = this.nodeIndex.queryRadiusInto(
+                this.nodeQueryScratch,
+                position,
+                radius,
+            );
 
             if (candidates.size > 0) {
                 let best = null;
@@ -216,8 +351,15 @@ export class Navigation {
 
     roadAt(position, extraTolerance = 0) {
         const candidates = extraTolerance > 0
-            ? this.roadIndex.queryRadius(position, extraTolerance)
-            : this.roadIndex.queryPoint(position);
+            ? this.roadIndex.queryRadiusInto(
+                this.roadQueryScratch,
+                position,
+                extraTolerance,
+            )
+            : this.roadIndex.queryPointInto(
+                this.roadQueryScratch,
+                position,
+            );
 
         let best = null;
 
@@ -239,6 +381,82 @@ export class Navigation {
         return best;
     }
 
+    findRouteFromPosition(position, destinationNodeId, mobility, {
+        nodeTolerance = 0.1,
+        roadTolerance = 0,
+    } = {}) {
+        const node = this.nodeAt(position, nodeTolerance);
+
+        if (node) {
+            const route = this.findRoute(node.id, destinationNodeId, mobility);
+            if (!route) return null;
+
+            return {
+                route,
+                entryPoint: null,
+            };
+        }
+
+        const hit = this.roadAt(position, roadTolerance);
+        if (!hit) return null;
+
+        const road = hit.road;
+        const speed = roadSpeed(road, mobility);
+        if (!(speed > 0)) return null;
+
+        const entrySeconds = distance(position, hit.point) / mobility.speed;
+        let best = null;
+
+        const consider = (endpointNodeId, reversed, partialDistance) => {
+            const baseRoute = this.findRoute(endpointNodeId, destinationNodeId, mobility);
+            if (!baseRoute) return;
+
+            const partialSeconds = partialDistance / speed;
+            const totalSeconds =
+                entrySeconds + partialSeconds + baseRoute.estimatedSeconds;
+
+            const partialLeg = partialDistance > EPSILON
+                ? [{
+                    roadId: road.id,
+                    reversed,
+                    startSegmentIndex: hit.segmentIndex,
+                }]
+                : [];
+
+            const candidate = {
+                route: {
+                    startNodeId: null,
+                    destinationNodeId,
+                    legs: [...partialLeg, ...baseRoute.legs],
+                    estimatedSeconds: totalSeconds,
+                },
+                entryPoint: distance(position, hit.point) > EPSILON
+                    ? { ...hit.point }
+                    : null,
+            };
+
+            if (!best || totalSeconds < best.route.estimatedSeconds) {
+                best = candidate;
+            }
+        };
+
+        consider(
+            road.to,
+            false,
+            road.length - hit.distanceAlong,
+        );
+
+        if (road.bidirectional) {
+            consider(
+                road.from,
+                true,
+                hit.distanceAlong,
+            );
+        }
+
+        return best;
+    }
+
     findRoute(startNodeId, destinationNodeId, mobility) {
         const start = this.nodes.get(startNodeId);
         const destination = this.nodes.get(destinationNodeId);
@@ -252,6 +470,7 @@ export class Navigation {
         }
 
         if (!(mobility?.speed > 0)) return null;
+        if (start.componentId !== destination.componentId) return null;
 
         if (startNodeId === destinationNodeId) {
             return {
@@ -263,14 +482,14 @@ export class Navigation {
         }
 
         const cacheKey =
-            `${this.graphVersion}|${startNodeId}|${destinationNodeId}|${mobilityCacheKey(mobility)}`;
+            `${startNodeId}|${destinationNodeId}|${mobilityCacheKey(mobility)}`;
 
         const cached = this.routeCache.get(cacheKey);
 
         if (cached) {
             this.routeCache.delete(cacheKey);
             this.routeCache.set(cacheKey, cached);
-            return cached;
+            return cached.route;
         }
 
         const fastestPossibleSpeed = maxTravelSpeed(mobility);
@@ -290,14 +509,16 @@ export class Navigation {
             const current = currentEntry.value;
             const currentCost = costs.get(current);
 
+            if (currentCost == null) continue;
             if (current === destinationNodeId) break;
 
             const currentNode = this.nodes.get(current);
             const expectedPriority =
                 currentCost +
-                distance(currentNode.position, destination.position) / fastestPossibleSpeed;
+                distance(currentNode.position, destination.position) /
+                    fastestPossibleSpeed;
 
-            if (currentEntry.priority > expectedPriority + 1e-9) {
+            if (currentEntry.priority > expectedPriority + EPSILON) {
                 continue;
             }
 
@@ -305,10 +526,7 @@ export class Navigation {
                 const road = this.roads.get(edge.roadId);
                 if (!road) continue;
 
-                const multiplier = mobility.surfaceMultipliers?.[road.surface] ?? 1;
-                if (!(multiplier > 0)) continue;
-
-                const speed = mobility.speed * multiplier;
+                const speed = roadSpeed(road, mobility);
                 if (!(speed > 0)) continue;
 
                 const nextCost = currentCost + road.length / speed;
@@ -317,11 +535,16 @@ export class Navigation {
                 if (nextCost >= knownCost) continue;
 
                 costs.set(edge.to, nextCost);
-                previous.set(edge.to, { previousNode: current, edge });
+                previous.set(edge.to, {
+                    previousNode: current,
+                    roadId: edge.roadId,
+                    reversed: edge.reversed,
+                });
 
                 const nextNode = this.nodes.get(edge.to);
                 const heuristic =
-                    distance(nextNode.position, destination.position) / fastestPossibleSpeed;
+                    distance(nextNode.position, destination.position) /
+                    fastestPossibleSpeed;
 
                 queue.push(edge.to, nextCost + heuristic);
             }
@@ -329,31 +552,22 @@ export class Navigation {
 
         if (!previous.has(destinationNodeId)) return null;
 
-        const edges = [];
+        const legs = [];
         let nodeId = destinationNodeId;
 
         while (nodeId !== startNodeId) {
             const step = previous.get(nodeId);
             if (!step) return null;
 
-            edges.push(step.edge);
+            legs.push({
+                roadId: step.roadId,
+                reversed: step.reversed,
+            });
+
             nodeId = step.previousNode;
         }
 
-        edges.reverse();
-
-        const legs = edges.map(edge => {
-            const road = this.roads.get(edge.roadId);
-
-            return {
-                roadId: road.id,
-                from: edge.from,
-                to: edge.to,
-                points: edge.reversed
-                    ? [...road.points].reverse().map(point => ({ ...point }))
-                    : road.points.map(point => ({ ...point })),
-            };
-        });
+        legs.reverse();
 
         const route = {
             startNodeId,
@@ -362,7 +576,7 @@ export class Navigation {
             estimatedSeconds: costs.get(destinationNodeId),
         };
 
-        this.#cacheRoute(cacheKey, route);
+        this.#cacheRoute(cacheKey, route, start.componentId);
         return route;
     }
 }

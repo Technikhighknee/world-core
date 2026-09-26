@@ -3,9 +3,14 @@ import test from "node:test";
 
 import { mobilityProfile } from "../src/world/mobility-profiles.js";
 import { Navigation } from "../src/world/navigation.js";
-import { startJourney, stopJourney } from "../src/world/movement.js";
+import {
+    rerouteJourney,
+    startJourney,
+    stopJourney,
+} from "../src/world/movement.js";
 import { stepSimulation } from "../src/world/simulation.js";
 import { SpatialHash } from "../src/world/spatial-hash.js";
+import { StaticSpatialIndex } from "../src/world/static-spatial-index.js";
 import { World } from "../src/world/world.js";
 
 function buildLineNavigation(length = 100) {
@@ -31,6 +36,46 @@ test("spatial hash keeps queries correct while entities move within and across c
     assert.equal(spatial.queryRadius({ x: 21, y: 2 }, 1).has("person"), true);
 });
 
+test("spatial queries can reuse caller-owned buffers", () => {
+    const world = new World({ spatialCellSize: 10 });
+
+    world.addEntity({ id: "a", position: { x: 0, y: 0 } });
+    world.addEntity({ id: "b", position: { x: 3, y: 0 } });
+
+    const buffer = world.createSpatialQueryBuffer();
+    const candidates = buffer.candidates;
+    const results = buffer.results;
+
+    const first = world.queryRadiusInto({ x: 0, y: 0 }, 5, buffer);
+    const second = world.queryRadiusInto({ x: 3, y: 0 }, 5, buffer);
+
+    assert.strictEqual(first, results);
+    assert.strictEqual(second, results);
+    assert.strictEqual(buffer.candidates, candidates);
+});
+
+test("maxEntityRadius shrinks again when the largest entity is removed", () => {
+    const world = new World();
+
+    world.addEntity({
+        id: "small",
+        position: { x: 0, y: 0 },
+        body: { radius: 0.5 },
+    });
+
+    world.addEntity({
+        id: "large",
+        position: { x: 0, y: 0 },
+        body: { radius: 10 },
+    });
+
+    assert.equal(world.maxEntityRadius, 10);
+
+    world.removeEntity("large");
+
+    assert.equal(world.maxEntityRadius, 0.5);
+});
+
 test("only active movers are tracked and completed journeys leave the active set", () => {
     const world = new World({ spatialCellSize: 10 });
     const navigation = buildLineNavigation(10);
@@ -51,10 +96,12 @@ test("only active movers are tracked and completed journeys leave the active set
     });
 
     startJourney(world, navigation, "walker", "b");
+
     assert.equal(world.entities.size, 1001);
     assert.equal(world.movingEntities.size, 1);
 
     stepSimulation(world, navigation, 10);
+
     assert.deepEqual(world.getEntity("walker").position, { x: 10, y: 0 });
     assert.equal(world.movingEntities.size, 0);
     assert.equal(world.getEntity("walker").journey, null);
@@ -115,8 +162,51 @@ test("movement commits position to the spatial index once per entity tick", () =
     assert.deepEqual(world.getEntity("walker").position, { x: 100, y: 0 });
 });
 
-test("navigation uses indexed node and road lookups", () => {
+test("journeys can start and reroute while already in the middle of a road", () => {
+    const world = new World({ spatialCellSize: 10 });
+    const navigation = buildLineNavigation(100);
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 40, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    assert.equal(startJourney(world, navigation, "walker", "b"), true);
+
+    stepSimulation(world, navigation, 10);
+    assert.equal(world.getEntity("walker").position.x, 50);
+
+    assert.equal(rerouteJourney(world, navigation, "walker", "a"), true);
+
+    stepSimulation(world, navigation, 10);
+    assert.equal(world.getEntity("walker").position.x, 40);
+});
+
+test("cached routes store road references instead of duplicated road geometry", () => {
+    const navigation = new Navigation({ routeCacheSize: 10 });
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+        shape: [{ x: 25, y: 1 }, { x: 50, y: -1 }, { x: 75, y: 1 }],
+    });
+
+    const route = navigation.findRoute("a", "b", {
+        profileId: "pedestrian-test",
+        speed: 1,
+    });
+
+    assert.deepEqual(route.legs, [{ roadId: "road", reversed: false }]);
+    assert.equal("points" in route.legs[0], false);
+});
+
+test("navigation uses indexed node and road lookups with consistent nearestNode return shape", () => {
     const navigation = new Navigation({ spatialCellSize: 10 });
+
     navigation.addNode({ id: "a", x: 0, y: 0 });
     navigation.addNode({ id: "b", x: 100, y: 0 });
     navigation.addRoad({
@@ -128,7 +218,11 @@ test("navigation uses indexed node and road lookups", () => {
     });
 
     assert.equal(navigation.nodeAt({ x: 0.05, y: 0 }, 0.1)?.id, "a");
-    assert.equal(navigation.nearestNode({ x: 90, y: 0 })?.node.id, "b");
+    assert.equal(navigation.nearestNode({ x: 90, y: 0 })?.id, "b");
+    assert.equal(
+        navigation.nearestNodeWithDistance({ x: 90, y: 0 })?.node.id,
+        "b",
+    );
     assert.equal(navigation.roadAt({ x: 50, y: 10 })?.road.id, "curved");
     assert.equal(navigation.roadAt({ x: 50, y: 30 }), null);
 });
@@ -166,6 +260,31 @@ test("A* finds the faster route and route results are cached", () => {
     assert.equal(navigation.routeCache.size, 1);
 });
 
+test("local graph changes do not invalidate cached routes in disconnected components", () => {
+    const navigation = new Navigation({ routeCacheSize: 10 });
+    const mobility = { profileId: "walker", speed: 1 };
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 10, y: 0 });
+    navigation.addRoad({ id: "ab", from: "a", to: "b" });
+
+    navigation.addNode({ id: "x", x: 1000, y: 0 });
+    navigation.addNode({ id: "y", x: 1010, y: 0 });
+    navigation.addRoad({ id: "xy", from: "x", to: "y" });
+
+    const ab = navigation.findRoute("a", "b", mobility);
+    const xy = navigation.findRoute("x", "y", mobility);
+
+    assert.equal(navigation.routeCache.size, 2);
+
+    navigation.addNode({ id: "c", x: 20, y: 0 });
+    navigation.addRoad({ id: "bc", from: "b", to: "c" });
+
+    assert.equal(navigation.routeCache.size, 1);
+    assert.strictEqual(navigation.findRoute("x", "y", mobility), xy);
+    assert.notStrictEqual(navigation.findRoute("a", "b", mobility), ab);
+});
+
 test("built-in mobility profiles expose stable cache identities", () => {
     const pedestrian = mobilityProfile("pedestrian");
     const cloned = structuredClone(pedestrian);
@@ -173,6 +292,56 @@ test("built-in mobility profiles expose stable cache identities", () => {
     assert.equal(pedestrian.profileId, "pedestrian");
     assert.equal(cloned.profileId, "pedestrian");
     assert.equal(pedestrian.speed, cloned.speed);
+});
+
+test("long roads are indexed along their traversed cells instead of their full bounding box", () => {
+    const index = new StaticSpatialIndex(10);
+
+    index.insertSegment(
+        "diagonal",
+        { x: 0, y: 0 },
+        { x: 1000, y: 1000 },
+    );
+
+    assert.ok(index.membershipCount() < 400);
+    assert.equal(index.queryPoint({ x: 500, y: 500 }).has("diagonal"), true);
+});
+
+test("movement LOD advances distant movers in coarse scheduled steps", () => {
+    const world = new World({
+        movementLodTiers: [
+            { maxDistance: 100, interval: 0 },
+            { maxDistance: Infinity, interval: 10 },
+        ],
+        interestPoints: [{ x: 0, y: 0 }],
+    });
+
+    const navigation = new Navigation();
+    navigation.addNode({ id: "a", x: 1000, y: 0 });
+    navigation.addNode({ id: "b", x: 1200, y: 0 });
+    navigation.addRoad({ id: "road", from: "a", to: "b" });
+
+    world.addEntity({
+        id: "far-walker",
+        position: { x: 1000, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(world, navigation, "far-walker", "b");
+
+    for (let i = 0; i < 9; i++) {
+        stepSimulation(world, navigation, 1);
+    }
+
+    assert.equal(world.getEntity("far-walker").position.x, 1000);
+
+    stepSimulation(world, navigation, 1);
+    assert.equal(world.getEntity("far-walker").position.x, 1010);
+
+    world.setInterestPoints([{ x: 1010, y: 0 }]);
+    stepSimulation(world, navigation, 1);
+
+    assert.equal(world.getEntity("far-walker").position.x, 1011);
 });
 
 test("nearby queries ignore thousands of far-away entities", () => {
@@ -188,9 +357,11 @@ test("nearby queries ignore thousands of far-away entities", () => {
         });
     }
 
-    const nearby = world.queryRadius(
+    const buffer = world.createSpatialQueryBuffer();
+    const nearby = world.queryRadiusInto(
         { x: 0, y: 0 },
         5,
+        buffer,
         { excludeId: "thief" },
     );
 

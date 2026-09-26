@@ -1,12 +1,13 @@
 {
   "name": "world-core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Scalable 2D world, navigation and movement simulation core",
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "test": "node --test",
-    "bench": "node benchmark/scalability.js"
+    "bench": "node --expose-gc benchmark/scalability.js",
+    "bench:soak": "node --expose-gc benchmark/soak.js"
   },
   "keywords": ["simulation", "world", "navigation", "pathfinding"],
   "author": "",
