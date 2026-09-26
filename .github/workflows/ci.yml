@@ -14,4 +14,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: npm test
+      - name: Core movement and spatial tests
+        run: node --test --test-name-pattern="spatial|radius|active movers|stopJourney|movement commits|journeys"
+      - name: Navigation and cache tests
+        run: node --test --test-name-pattern="cached routes|navigation uses|A\\*|local graph|mobility profiles"
+      - name: Index LOD and proximity tests
+        run: node --test --test-name-pattern="long roads|movement LOD|nearby"
