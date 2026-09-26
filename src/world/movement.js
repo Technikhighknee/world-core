@@ -23,7 +23,7 @@ function pointIndexIsDone(index, road, reversed) {
         : index >= road.points.length;
 }
 
-function beginJourney(world, entity, destinationNodeId, planned) {
+function beginJourney(world, navigation, entity, destinationNodeId, planned) {
     const route = planned.route;
 
     if (route.legs.length === 0 && !planned.entryPoint) {
@@ -34,7 +34,7 @@ function beginJourney(world, entity, destinationNodeId, planned) {
 
     const firstLeg = route.legs[0];
     const firstRoad = firstLeg
-        ? planned.navigation.roads.get(firstLeg.roadId)
+        ? navigation.roads.get(firstLeg.roadId)
         : null;
 
     entity.journey = {
@@ -70,8 +70,7 @@ export function startJourney(world, navigation, entityId, destinationNodeId) {
 
     if (!planned) return false;
 
-    planned.navigation = navigation;
-    return beginJourney(world, entity, destinationNodeId, planned);
+    return beginJourney(world, navigation, entity, destinationNodeId, planned);
 }
 
 export function rerouteJourney(world, navigation, entityId, destinationNodeId) {
@@ -84,25 +83,27 @@ export function stopJourney(entity, world = null) {
 }
 
 export function updateMovement(world, navigation, deltaSeconds) {
-    const batches = world.getMovementBatches(deltaSeconds);
     const reclassify = [];
 
-    for (const batch of batches) {
-        for (const entityId of batch.entityIds) {
-            const entity = world.getEntity(entityId);
+    world.forEachDueMovementBatch(
+        deltaSeconds,
+        (entityIds, elapsedSeconds) => {
+            for (const entityId of entityIds) {
+                const entity = world.getEntity(entityId);
 
-            if (!entity || !entity.journey) {
-                world.unmarkMoving(entityId);
-                continue;
+                if (!entity || !entity.journey) {
+                    world.unmarkMoving(entityId);
+                    continue;
+                }
+
+                moveEntity(world, navigation, entity, elapsedSeconds);
+
+                if (entity.journey) {
+                    reclassify.push(entityId);
+                }
             }
-
-            moveEntity(world, navigation, entity, batch.elapsedSeconds);
-
-            if (entity.journey) {
-                reclassify.push(entityId);
-            }
-        }
-    }
+        },
+    );
 
     for (const entityId of reclassify) {
         world.refreshEntityMovementLod(entityId);
