@@ -7,30 +7,11 @@ on:
     branches: [master]
 
 jobs:
-  isolate:
+  test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: spatial-hash
-            pattern: "spatial hash"
-          - name: spatial-query-buffer
-            pattern: "spatial queries"
-          - name: max-radius
-            pattern: "maxEntityRadius"
-          - name: active-movers
-            pattern: "active movers"
-          - name: stop-journey
-            pattern: "stopJourney"
-          - name: movement-commit
-            pattern: "movement commits"
-          - name: mid-road
-            pattern: "journeys can start"
-    name: test-${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: node --test --test-name-pattern="${{ matrix.pattern }}"
+      - run: npm test
