@@ -99,8 +99,8 @@ export class SpatialHash {
         return true;
     }
 
-    queryBounds(minX, minY, maxX, maxY) {
-        const result = new Set();
+    queryBoundsInto(result, minX, minY, maxX, maxY) {
+        result.clear();
         const range = this.#rangeForBounds(minX, minY, maxX, maxY);
 
         for (let y = range.startY; y <= range.endY; y++) {
@@ -117,12 +117,21 @@ export class SpatialHash {
         return result;
     }
 
-    queryRadius(position, radius) {
-        return this.queryBounds(
+    queryBounds(minX, minY, maxX, maxY) {
+        return this.queryBoundsInto(new Set(), minX, minY, maxX, maxY);
+    }
+
+    queryRadiusInto(result, position, radius) {
+        return this.queryBoundsInto(
+            result,
             position.x - radius,
             position.y - radius,
             position.x + radius,
             position.y + radius,
         );
+    }
+
+    queryRadius(position, radius) {
+        return this.queryRadiusInto(new Set(), position, radius);
     }
 }
