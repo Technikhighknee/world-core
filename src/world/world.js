@@ -2,12 +2,12 @@ import { distanceSquared } from "./vec2.js";
 import { SpatialHash } from "./spatial-hash.js";
 
 export class World {
-    constructor({
-        spatialCellSize = 20,
-    } = {}) {
+    constructor({ spatialCellSize = 20 } = {}) {
         this.time = 0;
         this.entities = new Map();
+        this.movingEntities = new Set();
         this.spatial = new SpatialHash(spatialCellSize);
+        this.maxEntityRadius = 0;
     }
 
     addEntity(entity) {
@@ -20,23 +20,25 @@ export class World {
         }
 
         const stored = structuredClone(entity);
-        
         stored.body ??= { radius: 0.35 };
 
-        this.entities.set(stored.id, stored);
+        const radius = stored.body.radius ?? 0;
+        this.maxEntityRadius = Math.max(this.maxEntityRadius, radius);
 
-        this.spatial.upsert(
-            stored.id,
-            stored.position,
-            stored.body.radius ?? 0,
-        );
-        
+        this.entities.set(stored.id, stored);
+        this.spatial.upsert(stored.id, stored.position, radius);
+
+        if (stored.journey) {
+            this.movingEntities.add(stored.id);
+        }
+
         return stored;
     }
 
     removeEntity(entityId) {
+        this.movingEntities.delete(entityId);
         this.spatial.remove(entityId);
-        return this.entities.delete(entityId)
+        return this.entities.delete(entityId);
     }
 
     getEntity(entityId) {
@@ -45,6 +47,7 @@ export class World {
 
     setPosition(entityId, position) {
         const entity = this.entities.get(entityId);
+
         if (!entity) {
             throw new Error(`Unknown entity: ${entityId}`);
         }
@@ -59,13 +62,28 @@ export class World {
         );
     }
 
-    queryRadius(position, radius, { excludeId = null, predicate = null} = {}) {
-        const candidates = this.spatial.queryRadius(position, radius);
+    markMoving(entityId) {
+        if (!this.entities.has(entityId)) {
+            throw new Error(`Unknown entity: ${entityId}`);
+        }
+
+        this.movingEntities.add(entityId);
+    }
+
+    unmarkMoving(entityId) {
+        this.movingEntities.delete(entityId);
+    }
+
+    queryRadius(position, radius, { excludeId = null, predicate = null } = {}) {
+        const candidates = this.spatial.queryRadius(
+            position,
+            radius + this.maxEntityRadius,
+        );
         const result = [];
 
         for (const entityId of candidates) {
             if (entityId === excludeId) continue;
-            
+
             const entity = this.entities.get(entityId);
             if (!entity) continue;
 
