@@ -98,30 +98,32 @@ export class StaticSpatialIndex {
 
             if (x === endX && y === endY) break;
 
-            if (tMaxX < tMaxY) {
+            const nextX = x === endX ? Infinity : tMaxX;
+            const nextY = y === endY ? Infinity : tMaxY;
+
+            if (nextX < nextY) {
                 x += stepX;
                 tMaxX += tDeltaX;
                 continue;
             }
 
-            if (tMaxY < tMaxX) {
+            if (nextY < nextX) {
                 y += stepY;
                 tMaxY += tDeltaY;
                 continue;
             }
 
-            if (stepX !== 0) {
+            if (stepX !== 0 && x !== endX) {
                 this.#insertPaddedCell(id, x + stepX, y, paddingCells);
+                x += stepX;
+                tMaxX += tDeltaX;
             }
 
-            if (stepY !== 0) {
+            if (stepY !== 0 && y !== endY) {
                 this.#insertPaddedCell(id, x, y + stepY, paddingCells);
+                y += stepY;
+                tMaxY += tDeltaY;
             }
-
-            x += stepX;
-            y += stepY;
-            tMaxX += tDeltaX;
-            tMaxY += tDeltaY;
         }
     }
 
