@@ -1,11 +1,55 @@
-import { distance } from "./vec2.js";
 import { closestPointOnPolyline, polylineLength } from "./geometry.js";
+import { MinPriorityQueue } from "./priority-queue.js";
+import { StaticSpatialIndex } from "./static-spatial-index.js";
+import { distance } from "./vec2.js";
+
+function mobilityCacheKey(mobility) {
+    const multipliers = Object.entries(mobility.surfaceMultipliers ?? {})
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([surface, multiplier]) => `${surface}:${multiplier}`)
+        .join(",");
+
+    return `${mobility.speed}|${multipliers}`;
+}
+
+function maxTravelSpeed(mobility) {
+    const multipliers = Object.values(mobility.surfaceMultipliers ?? {});
+    const maxMultiplier = Math.max(1, ...multipliers.filter(value => value > 0));
+    return mobility.speed * maxMultiplier;
+}
 
 export class Navigation {
-    constructor() {
+    constructor({ spatialCellSize = 50, routeCacheSize = 5000 } = {}) {
         this.nodes = new Map();
         this.roads = new Map();
         this.adjacency = new Map();
+
+        this.nodeIndex = new StaticSpatialIndex(spatialCellSize);
+        this.roadIndex = new StaticSpatialIndex(spatialCellSize);
+
+        this.routeCacheSize = routeCacheSize;
+        this.routeCache = new Map();
+        this.graphVersion = 0;
+    }
+
+    #invalidateRoutes() {
+        this.graphVersion++;
+        this.routeCache.clear();
+    }
+
+    #cacheRoute(key, route) {
+        if (this.routeCacheSize <= 0) return;
+
+        if (this.routeCache.has(key)) {
+            this.routeCache.delete(key);
+        }
+
+        this.routeCache.set(key, route);
+
+        while (this.routeCache.size > this.routeCacheSize) {
+            const oldestKey = this.routeCache.keys().next().value;
+            this.routeCache.delete(oldestKey);
+        }
     }
 
     addNode({ id, x, y }) {
@@ -13,25 +57,29 @@ export class Navigation {
             throw new Error(`Navigation node already exists: ${id}`);
         }
 
-        const node = { id, position: { x, y } }
-        
+        const node = { id, position: { x, y } };
+
         this.nodes.set(id, node);
         this.adjacency.set(id, []);
+        this.nodeIndex.insertPoint(id, node.position);
+        this.#invalidateRoutes();
 
         return node;
     }
 
     addRoad({
-        id, from, to,
+        id,
+        from,
+        to,
         shape = [],
         width = 4,
         surface = "street",
-        bidirectional = true
+        bidirectional = true,
     }) {
         if (this.roads.has(id)) {
             throw new Error(`Road already exists: ${id}`);
         }
-        
+
         const start = this.nodes.get(from);
         const end = this.nodes.get(to);
 
@@ -42,37 +90,58 @@ export class Navigation {
         const points = [
             { ...start.position },
             ...shape.map(point => ({ ...point })),
-            { ...end.position }
+            { ...end.position },
         ];
-        
+
         const road = {
-            id, from, to,
-            width, 
-            surface, 
+            id,
+            from,
+            to,
+            width,
+            surface,
             bidirectional,
             points,
-            length: polylineLength(points)
-        }
+            length: polylineLength(points),
+        };
 
         this.roads.set(id, road);
-        
-        this.adjacency
-            .get(from)
-            .push({ roadId: id, from, to, reversed: false });
-        
+        this.adjacency.get(from).push({ roadId: id, from, to, reversed: false });
+
         if (bidirectional) {
-            this.adjacency
-                .get(to)
-                .push({ roadId: id, from: to, to: from, reversed: true });
+            this.adjacency.get(to).push({
+                roadId: id,
+                from: to,
+                to: from,
+                reversed: true,
+            });
         }
 
+        const padding = width / 2;
+        for (let i = 1; i < points.length; i++) {
+            const a = points[i - 1];
+            const b = points[i];
+
+            this.roadIndex.insertBounds(
+                id,
+                Math.min(a.x, b.x) - padding,
+                Math.min(a.y, b.y) - padding,
+                Math.max(a.x, b.x) + padding,
+                Math.max(a.y, b.y) + padding,
+            );
+        }
+
+        this.#invalidateRoutes();
         return road;
     }
 
     nodeAt(position, tolerance = 0.01) {
+        const candidates = this.nodeIndex.queryRadius(position, tolerance);
         let best = null;
 
-        for (const node of this.nodes.values()) {
+        for (const nodeId of candidates) {
+            const node = this.nodes.get(nodeId);
+            if (!node) continue;
+
             const d = distance(node.position, position);
             if (d > tolerance) continue;
 
@@ -85,25 +154,54 @@ export class Navigation {
     }
 
     nearestNode(position) {
-        let best = null;
+        if (this.nodes.size === 0) return null;
 
+        let radius = this.nodeIndex.cellSize;
+
+        for (let attempt = 0; attempt < 24; attempt++) {
+            const candidates = this.nodeIndex.queryRadius(position, radius);
+
+            if (candidates.size > 0) {
+                let best = null;
+
+                for (const nodeId of candidates) {
+                    const node = this.nodes.get(nodeId);
+                    if (!node) continue;
+
+                    const d = distance(position, node.position);
+                    if (!best || d < best.distance) {
+                        best = { node, distance: d };
+                    }
+                }
+
+                if (best && best.distance <= radius) return best;
+            }
+
+            radius *= 2;
+        }
+
+        let best = null;
         for (const node of this.nodes.values()) {
             const d = distance(position, node.position);
-
-            if (!best || d < best.distance) {
-                best = { node, distance: d }
-            };
+            if (!best || d < best.distance) best = { node, distance: d };
         }
 
         return best;
     }
 
     roadAt(position, extraTolerance = 0) {
+        const candidates = extraTolerance > 0
+            ? this.roadIndex.queryRadius(position, extraTolerance)
+            : this.roadIndex.queryPoint(position);
+
         let best = null;
 
-        for (const road of this.roads.values()) {
+        for (const roadId of candidates) {
+            const road = this.roads.get(roadId);
+            if (!road) continue;
+
             const closest = closestPointOnPolyline(position, road.points);
-            if (!closest) continue; 
+            if (!closest) continue;
 
             const allowedDistance = road.width / 2 + extraTolerance;
             if (closest.distance > allowedDistance) continue;
@@ -111,20 +209,24 @@ export class Navigation {
             if (!best || closest.distance < best.distance) {
                 best = { road, ...closest };
             }
-
         }
 
         return best;
     }
 
     findRoute(startNodeId, destinationNodeId, mobility) {
-        if (!this.nodes.has(startNodeId)) {
+        const start = this.nodes.get(startNodeId);
+        const destination = this.nodes.get(destinationNodeId);
+
+        if (!start) {
             throw new Error(`Unknown start node: ${startNodeId}`);
         }
 
-        if (!this.nodes.has(destinationNodeId)) {
+        if (!destination) {
             throw new Error(`Unknown destination node: ${destinationNodeId}`);
         }
+
+        if (!(mobility?.speed > 0)) return null;
 
         if (startNodeId === destinationNodeId) {
             return {
@@ -135,59 +237,65 @@ export class Navigation {
             };
         }
 
-        const distances = new Map();
-        const previous = new Map();
-        const unvisited = new Set(this.nodes.keys());
+        const cacheKey = `${this.graphVersion}|${startNodeId}|${destinationNodeId}|${mobilityCacheKey(mobility)}`;
+        const cached = this.routeCache.get(cacheKey);
 
-        for (const nodeId of unvisited) {
-            distances.set(nodeId, Infinity);
+        if (cached) {
+            this.routeCache.delete(cacheKey);
+            this.routeCache.set(cacheKey, cached);
+            return cached;
         }
 
-        distances.set(startNodeId, 0);
+        const fastestPossibleSpeed = maxTravelSpeed(mobility);
+        if (!(fastestPossibleSpeed > 0)) return null;
 
-        while (unvisited.size > 0) {
-            let current = null;
-            let currentCost = Infinity;
+        const queue = new MinPriorityQueue();
+        const costs = new Map([[startNodeId, 0]]);
+        const previous = new Map();
 
-            for (const nodeId of unvisited) {
-                const cost = distances.get(nodeId);
+        queue.push(
+            startNodeId,
+            distance(start.position, destination.position) / fastestPossibleSpeed,
+        );
 
-                if (cost < currentCost) {
-                    current = nodeId;
-                    currentCost = cost;
-                }
+        while (queue.size > 0) {
+            const currentEntry = queue.pop();
+            const current = currentEntry.value;
+            const currentCost = costs.get(current);
+
+            if (current === destinationNodeId) break;
+
+            const currentNode = this.nodes.get(current);
+            const expectedPriority = currentCost +
+                distance(currentNode.position, destination.position) / fastestPossibleSpeed;
+
+            if (currentEntry.priority > expectedPriority + 1e-9) {
+                continue;
             }
 
-            if (current === null || currentCost === Infinity) {
-                break;
-            }
-
-            unvisited.delete(current);
-            
-            if (current === destinationNodeId) {
-                break;
-            }
-
-            const edges = this.adjacency.get(current) ?? [];
-            
-            for (const edge of edges) {
-                if (!unvisited.has(edge.to)) continue;
-
+            for (const edge of this.adjacency.get(current) ?? []) {
                 const road = this.roads.get(edge.roadId);
+                if (!road) continue;
 
                 const multiplier = mobility.surfaceMultipliers?.[road.surface] ?? 1;
-                if (multiplier <= 0) continue;
+                if (!(multiplier > 0)) continue;
 
                 const speed = mobility.speed * multiplier;
-                if (speed <= 0) continue;
+                if (!(speed > 0)) continue;
 
-                const travelTime = road.length / speed;
-                const alternative = currentCost + travelTime
+                const nextCost = currentCost + road.length / speed;
+                const knownCost = costs.get(edge.to) ?? Infinity;
 
-                if (alternative < distances.get(edge.to)) {
-                    distances.set(edge.to, alternative);
-                    previous.set(edge.to, { previousNode: current, edge });
-                }
+                if (nextCost >= knownCost) continue;
+
+                costs.set(edge.to, nextCost);
+                previous.set(edge.to, { previousNode: current, edge });
+
+                const nextNode = this.nodes.get(edge.to);
+                const heuristic =
+                    distance(nextNode.position, destination.position) / fastestPossibleSpeed;
+
+                queue.push(edge.to, nextCost + heuristic);
             }
         }
 
@@ -196,7 +304,7 @@ export class Navigation {
         const edges = [];
         let nodeId = destinationNodeId;
 
-        while(nodeId !== startNodeId) {
+        while (nodeId !== startNodeId) {
             const step = previous.get(nodeId);
             if (!step) return null;
 
@@ -208,24 +316,25 @@ export class Navigation {
 
         const legs = edges.map(edge => {
             const road = this.roads.get(edge.roadId);
-            
+
             return {
                 roadId: road.id,
                 from: edge.from,
                 to: edge.to,
                 points: edge.reversed
-                    ? [...road.points]
-                        .reverse()
-                        .map(point => ({ ...point }))
-                    : road.points.map(point => ({ ...point }))
-            }
+                    ? [...road.points].reverse().map(point => ({ ...point }))
+                    : road.points.map(point => ({ ...point })),
+            };
         });
 
-        return {
+        const route = {
             startNodeId,
             destinationNodeId,
             legs,
-            estimatedSeconds: distances.get(destinationNodeId)
+            estimatedSeconds: costs.get(destinationNodeId),
         };
+
+        this.#cacheRoute(cacheKey, route);
+        return route;
     }
 }
