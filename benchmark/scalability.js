@@ -84,6 +84,40 @@ function addCityGraph(city) {
     }
 }
 
+function createRouteQueries(count) {
+    let state = 0x12345678;
+    const queries = [];
+    const seen = new Set();
+
+    function nextInt(max) {
+        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+        return state % max;
+    }
+
+    while (queries.length < count) {
+        const city = nextInt(cityCount);
+        const sourceX = nextInt(gridSize);
+        const sourceY = nextInt(gridSize);
+        const destinationX = nextInt(gridSize);
+        const destinationY = nextInt(gridSize);
+
+        if (sourceX === destinationX && sourceY === destinationY) continue;
+
+        const key =
+            `${city}:${sourceX}:${sourceY}:${destinationX}:${destinationY}`;
+
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        queries.push({
+            from: nodeId(city, sourceX, sourceY),
+            to: nodeId(city, destinationX, destinationY),
+        });
+    }
+
+    return queries;
+}
+
 const buildStarted = performance.now();
 
 for (let city = 0; city < cityCount; city++) {
@@ -91,42 +125,21 @@ for (let city = 0; city < cityCount; city++) {
 }
 
 const graphBuildElapsed = performance.now() - buildStarted;
+const queries = createRouteQueries(routeQueries);
+
+navigation.routeCache.clear();
 
 const coldRoutingStarted = performance.now();
 
-for (let i = 0; i < routeQueries; i++) {
-    const city = i % cityCount;
-    const sourceX = (i * 7) % gridSize;
-    const sourceY = (i * 11) % gridSize;
-    const destinationX = (gridSize - 1 - sourceX + gridSize) % gridSize;
-    const destinationY = (gridSize - 1 - sourceY + gridSize) % gridSize;
-
-    if (sourceX === destinationX && sourceY === destinationY) continue;
-
-    navigation.findRoute(
-        nodeId(city, sourceX, sourceY),
-        nodeId(city, destinationX, destinationY),
-        pedestrian,
-    );
+for (const query of queries) {
+    navigation.findRoute(query.from, query.to, pedestrian);
 }
 
 const coldRoutingElapsed = performance.now() - coldRoutingStarted;
 const warmRoutingStarted = performance.now();
 
-for (let i = 0; i < routeQueries; i++) {
-    const city = i % cityCount;
-    const sourceX = (i * 7) % gridSize;
-    const sourceY = (i * 11) % gridSize;
-    const destinationX = (gridSize - 1 - sourceX + gridSize) % gridSize;
-    const destinationY = (gridSize - 1 - sourceY + gridSize) % gridSize;
-
-    if (sourceX === destinationX && sourceY === destinationY) continue;
-
-    navigation.findRoute(
-        nodeId(city, sourceX, sourceY),
-        nodeId(city, destinationX, destinationY),
-        pedestrian,
-    );
+for (const query of queries) {
+    navigation.findRoute(query.from, query.to, pedestrian);
 }
 
 const warmRoutingElapsed = performance.now() - warmRoutingStarted;
@@ -170,8 +183,8 @@ console.log(`roads: ${navigation.roads.size.toLocaleString()}`);
 console.log(`entities: ${world.entities.size.toLocaleString()}`);
 console.log(`active movers: ${world.movingEntities.size.toLocaleString()}`);
 console.log(`graph build: ${graphBuildElapsed.toFixed(2)} ms`);
-console.log(`cold route queries (${routeQueries}): ${coldRoutingElapsed.toFixed(2)} ms`);
-console.log(`warm route queries (${routeQueries}): ${warmRoutingElapsed.toFixed(2)} ms`);
+console.log(`unique cold route queries (${queries.length}): ${coldRoutingElapsed.toFixed(2)} ms`);
+console.log(`same warm route queries (${queries.length}): ${warmRoutingElapsed.toFixed(2)} ms`);
 
 const movementStarted = performance.now();
 
