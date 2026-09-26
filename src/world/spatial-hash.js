@@ -1,9 +1,20 @@
+function sameRange(a, b) {
+    return a && b &&
+        a.startX === b.startX &&
+        a.endX === b.endX &&
+        a.startY === b.startY &&
+        a.endY === b.endY;
+}
+
 export class SpatialHash {
     constructor(cellSize = 20) {
-        this.cellSize = cellSize;
+        if (!(cellSize > 0)) {
+            throw new Error("SpatialHash cellSize must be greater than 0");
+        }
 
+        this.cellSize = cellSize;
         this.cells = new Map();
-        this.entityCells = new Map();
+        this.entityRanges = new Map();
     }
 
     #coordinate(value) {
@@ -14,75 +25,92 @@ export class SpatialHash {
         return `${x}:${y}`;
     }
 
-    #keyForBounds(minX, minY, maxX, maxY) {
-        const keys = [];
-        
-        const startX = this.#coordinate(minX);
-        const endX = this.#coordinate(maxX);
-        const startY = this.#coordinate(minY);
-        const endY = this.#coordinate(maxY);
+    #rangeForBounds(minX, minY, maxX, maxY) {
+        return {
+            startX: this.#coordinate(minX),
+            endX: this.#coordinate(maxX),
+            startY: this.#coordinate(minY),
+            endY: this.#coordinate(maxY),
+        };
+    }
 
-        for (let y = startY; y <= endY; y++) {
-            for (let x = startX; x <= endX; x++) {
-                keys.push(this.#key(x, y));
+    #addToRange(entityId, range) {
+        for (let y = range.startY; y <= range.endY; y++) {
+            for (let x = range.startX; x <= range.endX; x++) {
+                const key = this.#key(x, y);
+                let cell = this.cells.get(key);
+
+                if (!cell) {
+                    cell = new Set();
+                    this.cells.set(key, cell);
+                }
+
+                cell.add(entityId);
             }
         }
+    }
 
-        return keys;
+    #removeFromRange(entityId, range) {
+        for (let y = range.startY; y <= range.endY; y++) {
+            for (let x = range.startX; x <= range.endX; x++) {
+                const key = this.#key(x, y);
+                const cell = this.cells.get(key);
+                if (!cell) continue;
+
+                cell.delete(entityId);
+                if (cell.size === 0) this.cells.delete(key);
+            }
+        }
     }
 
     upsert(entityId, position, radius = 0) {
-        this.remove(entityId);
-        
-        const keys = this.#keyForBounds (
+        return this.upsertBounds(
+            entityId,
             position.x - radius,
             position.y - radius,
             position.x + radius,
-            position.y + radius
+            position.y + radius,
         );
+    }
 
-        const occupied = new Set();
+    upsertBounds(entityId, minX, minY, maxX, maxY) {
+        const nextRange = this.#rangeForBounds(minX, minY, maxX, maxY);
+        const currentRange = this.entityRanges.get(entityId);
 
-        for (const key of keys) {
-            let cell = this.cells.get(key);
-
-            if (!cell) {
-                cell = new Set();
-                this.cells.set(key, cell);
-            }
-
-            cell.add(entityId);
-            occupied.add(key);
+        if (sameRange(currentRange, nextRange)) {
+            return false;
         }
 
-        this.entityCells.set(entityId, occupied);
+        if (currentRange) {
+            this.#removeFromRange(entityId, currentRange);
+        }
+
+        this.#addToRange(entityId, nextRange);
+        this.entityRanges.set(entityId, nextRange);
+        return true;
     }
 
     remove(entityId) {
-        const occupied = this.entityCells.get(entityId);
-        if (!occupied) return;
+        const range = this.entityRanges.get(entityId);
+        if (!range) return false;
 
-        for (const key of occupied) {
-            const cell = this.cells.get(key);
-            if (!cell) continue;
-
-            cell.delete(entityId);
-            if (cell.size === 0) this.cells.delete(key);
-        }
-
-        this.entityCells.delete(entityId);
+        this.#removeFromRange(entityId, range);
+        this.entityRanges.delete(entityId);
+        return true;
     }
 
     queryBounds(minX, minY, maxX, maxY) {
         const result = new Set();
-        const keys = this.#keyForBounds(minX, minY, maxX, maxY);
+        const range = this.#rangeForBounds(minX, minY, maxX, maxY);
 
-        for (const key of keys) {
-            const cell = this.cells.get(key);
-            if (!cell) continue;
+        for (let y = range.startY; y <= range.endY; y++) {
+            for (let x = range.startX; x <= range.endX; x++) {
+                const cell = this.cells.get(this.#key(x, y));
+                if (!cell) continue;
 
-            for (const entityId of cell) {
-                result.add(entityId);
+                for (const entityId of cell) {
+                    result.add(entityId);
+                }
             }
         }
 
