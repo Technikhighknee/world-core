@@ -24,6 +24,7 @@ const entitiesPerCity = Number(
 const moversPerCity = Number(
     process.env.PROFILE_MOVERS_PER_CITY ?? 1000,
 );
+const warmupTicks = Number(process.env.PROFILE_WARMUP_TICKS ?? 800);
 const ticks = Number(process.env.PROFILE_TICKS ?? 200);
 const samplingIntervalMicros = Number(
     process.env.PROFILE_SAMPLING_INTERVAL_US ?? 500,
@@ -128,6 +129,16 @@ function summarizeProfile(profile) {
         .sort((a, b) => b.micros - a.micros);
 }
 
+const warmupDurations = [];
+
+for (let tick = 0; tick < warmupTicks; tick++) {
+    const started = performance.now();
+    stepSimulation(world, navigation, 1);
+    warmupDurations.push(performance.now() - started);
+}
+
+const beforeProfile = world.assertInternalConsistency();
+
 const session = new inspector.Session();
 session.connect();
 
@@ -155,10 +166,21 @@ console.log(`entities: ${world.entities.size.toLocaleString()}`);
 console.log(
     `active movers: ${world.movingEntities.size.toLocaleString()}`,
 );
-console.log(`ticks: ${ticks.toLocaleString()}`);
+console.log(`warmup ticks: ${warmupTicks.toLocaleString()}`);
+console.log(`profiled ticks: ${ticks.toLocaleString()}`);
 console.log(
     `sampling interval: ${samplingIntervalMicros.toLocaleString()} us`,
 );
+console.log(
+    `spatial cells before profile: ${beforeProfile.spatialCellCount.toLocaleString()}`,
+);
+console.log(
+    `spatial memberships before profile: ${beforeProfile.spatialMemberships.toLocaleString()}`,
+);
+console.log(
+    `multi-occupancy cells before profile: ${beforeProfile.spatialMultiOccupancyCells.toLocaleString()}`,
+);
+printDurationSummary("warmup tick", warmupDurations);
 printDurationSummary("profiled tick", tickDurations);
 
 console.log("\n=== top sampled self-time ===");
