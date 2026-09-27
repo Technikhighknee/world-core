@@ -42,6 +42,7 @@ export class Navigation {
         spatialCellSize = 50,
         routeCacheSize = 5000,
         routeCacheMaxLegs = 256,
+        routeCacheMaxTotalLegs = 100000,
     } = {}) {
         this.nodes = new Map();
         this.roads = new Map();
@@ -52,8 +53,9 @@ export class Navigation {
 
         this.routeCacheSize = routeCacheSize;
         this.routeCacheMaxLegs = routeCacheMaxLegs;
+        this.routeCacheMaxTotalLegs = routeCacheMaxTotalLegs;
         this.routeCache = new Map();
-        this.routeKeysByRoad = new Map();
+        this.routeCacheLegCount = 0;
 
         this.componentMembers = new Map();
         this.nextComponentId = 1;
@@ -67,14 +69,7 @@ export class Navigation {
         if (!entry) return false;
 
         this.routeCache.delete(key);
-
-        for (const leg of entry.route.legs) {
-            const keys = this.routeKeysByRoad.get(leg.roadId);
-            if (!keys) continue;
-
-            keys.delete(key);
-            if (keys.size === 0) this.routeKeysByRoad.delete(leg.roadId);
-        }
+        this.routeCacheLegCount -= entry.route.legs.length;
 
         return true;
     }
@@ -135,45 +130,28 @@ export class Navigation {
 
         const entry = { route, componentId };
         this.routeCache.set(key, entry);
+        this.routeCacheLegCount += route.legs.length;
 
-        for (const leg of route.legs) {
-            let keys = this.routeKeysByRoad.get(leg.roadId);
-
-            if (!keys) {
-                keys = new Set();
-                this.routeKeysByRoad.set(leg.roadId, keys);
-            }
-
-            keys.add(key);
-        }
-
-        while (this.routeCache.size > this.routeCacheSize) {
+        while (
+            this.routeCache.size > this.routeCacheSize ||
+            this.routeCacheLegCount > this.routeCacheMaxTotalLegs
+        ) {
             const oldestKey = this.routeCache.keys().next().value;
             this.#deleteCachedRoute(oldestKey);
         }
     }
 
-    invalidateRoadRoutes(roadId, { mayImprove = true } = {}) {
+    invalidateRoadRoutes(roadId) {
         const road = this.roads.get(roadId);
         if (!road) return;
 
-        if (mayImprove) {
-            const componentId = this.nodes.get(road.from)?.componentId;
-            if (componentId != null) this.#invalidateComponent(componentId);
-            return;
-        }
-
-        const keys = this.routeKeysByRoad.get(roadId);
-        if (!keys) return;
-
-        for (const key of [...keys]) {
-            this.#deleteCachedRoute(key);
-        }
+        const componentId = this.nodes.get(road.from)?.componentId;
+        if (componentId != null) this.#invalidateComponent(componentId);
     }
 
     invalidateAllRoutes() {
         this.routeCache.clear();
-        this.routeKeysByRoad.clear();
+        this.routeCacheLegCount = 0;
     }
 
     addNode({ id, x, y }) {
@@ -271,7 +249,7 @@ export class Navigation {
         if (road.surface === surface) return false;
 
         road.surface = surface;
-        this.invalidateRoadRoutes(roadId, { mayImprove: true });
+        this.invalidateRoadRoutes(roadId);
         return true;
     }
 
