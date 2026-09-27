@@ -18,6 +18,7 @@ export class World {
         this.movementBuckets = new Map();
         this.movementAccumulators = new Map();
         this.entityMovementIntervals = new Map();
+        this.movementReclassifyScratch = [];
 
         this.movementLodTiers = null;
         this.interestPoints = [];
@@ -123,6 +124,11 @@ export class World {
         }
 
         const stored = structuredClone(entity);
+
+        if (entity.mobility && Object.isFrozen(entity.mobility)) {
+            stored.mobility = entity.mobility;
+        }
+
         stored.body ??= { radius: 0.35 };
 
         const radius = stored.body.radius ?? 0;
