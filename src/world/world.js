@@ -123,10 +123,14 @@ export class World {
             throw new Error(`Entity ${entity.id} has no position`);
         }
 
-        const stored = structuredClone(entity);
+        let stored;
 
         if (entity.mobility && Object.isFrozen(entity.mobility)) {
-            stored.mobility = entity.mobility;
+            const { mobility, ...cloneable } = entity;
+            stored = structuredClone(cloneable);
+            stored.mobility = mobility;
+        } else {
+            stored = structuredClone(entity);
         }
 
         stored.body ??= { radius: 0.35 };
