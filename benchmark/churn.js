@@ -50,6 +50,7 @@ const memorySampleEvery = Number(
 const retentionCheckEvery = Number(
     process.env.CHURN_RETENTION_CHECK_EVERY ?? 250,
 );
+const memoryOnly = process.env.CHURN_MEMORY_ONLY === "1";
 
 if (targetMovers > totalEntities) {
     throw new Error("CHURN_MOVERS cannot exceed CHURN_ENTITIES");
@@ -58,7 +59,7 @@ if (targetMovers > totalEntities) {
 const pedestrian = mobilityProfile("pedestrian");
 const rng = createRng(0x51f15e);
 const forcedGcSamples = [];
-const gcMonitor = new GcMonitor();
+const gcMonitor = memoryOnly ? null : new GcMonitor();
 
 const startup = await forceGc("startup post-GC", forcedGcSamples);
 
@@ -221,10 +222,10 @@ const diagnosticSnapshots = [{
     ...world.assertInternalConsistency(),
 }];
 
-const simulationTicks = [];
-const maintenanceDurations = [];
-const totalLoopDurations = [];
-const memorySamples = [afterPopulation];
+const simulationTicks = memoryOnly ? null : [];
+const maintenanceDurations = memoryOnly ? null : [];
+const totalLoopDurations = memoryOnly ? null : [];
+const memorySamples = memoryOnly ? null : [afterPopulation];
 const retainedCheckpoints = [afterPopulation];
 
 let totalReroutes = 0;
@@ -236,22 +237,24 @@ let minMoversAfterMaintenance = world.movingEntities.size;
 let maxMoversAfterMaintenance = world.movingEntities.size;
 
 for (let tick = 1; tick <= ticks; tick++) {
-    const loopStarted = performance.now();
-    const simulationStarted = performance.now();
+    const loopStarted = memoryOnly ? 0 : performance.now();
+    const simulationStarted = memoryOnly ? 0 : performance.now();
 
     stepSimulation(world, navigation, 1);
 
-    const simulationEnded = performance.now();
+    const simulationEnded = memoryOnly ? 0 : performance.now();
 
-    simulationTicks.push({
-        tick,
-        startTime: simulationStarted,
-        endTime: simulationEnded,
-        duration: simulationEnded - simulationStarted,
-        movers: world.movingEntities.size,
-    });
+    if (!memoryOnly) {
+        simulationTicks.push({
+            tick,
+            startTime: simulationStarted,
+            endTime: simulationEnded,
+            duration: simulationEnded - simulationStarted,
+            movers: world.movingEntities.size,
+        });
+    }
 
-    const maintenanceStarted = performance.now();
+    const maintenanceStarted = memoryOnly ? 0 : performance.now();
 
     for (let i = 0; i < reroutesPerTick; i++) {
         const moverIndex = rng.nextInt(moverIds.length);
@@ -357,13 +360,22 @@ for (let tick = 1; tick <= ticks; tick++) {
         world.movingEntities.size,
     );
 
-    const maintenanceEnded = performance.now();
-    maintenanceDurations.push(maintenanceEnded - maintenanceStarted);
-    totalLoopDurations.push(maintenanceEnded - loopStarted);
+    if (!memoryOnly) {
+        const maintenanceEnded = performance.now();
+        maintenanceDurations.push(
+            maintenanceEnded - maintenanceStarted,
+        );
+        totalLoopDurations.push(
+            maintenanceEnded - loopStarted,
+        );
+    }
 
-    if (tick % memorySampleEvery === 0 || tick === ticks) {
+    if (
+        !memoryOnly &&
+        (tick % memorySampleEvery === 0 || tick === ticks)
+    ) {
         memorySamples.push(sampleMemory(`tick ${tick}`, tick));
-        await gcMonitor.flush();
+        if (gcMonitor) if (gcMonitor) await gcMonitor.flush();
     }
 
     if (
@@ -383,7 +395,7 @@ for (let tick = 1; tick <= ticks; tick++) {
             ...world.assertInternalConsistency(),
         });
 
-        await gcMonitor.flush();
+        if (gcMonitor) if (gcMonitor) await gcMonitor.flush();
     }
 }
 
@@ -401,7 +413,7 @@ const afterFinalGc = await forceGc(
 
 retainedCheckpoints.push(afterFinalGc);
 
-await gcMonitor.flush();
+if (gcMonitor) await gcMonitor.flush();
 
 const routeCacheSizeBeforeClear = navigation.routeCache.size;
 const routeCacheLegsBeforeClear = navigation.routeCacheLegCount;
@@ -428,31 +440,39 @@ const afterEntityClear = await forceGc(
     forcedGcSamples,
 );
 
-await gcMonitor.flush();
-gcMonitor.stop();
+if (gcMonitor) await gcMonitor.flush();
+if (gcMonitor) gcMonitor.stop();
 
-const automaticGcEvents = withoutForcedGc(
-    gcMonitor.events,
-    forcedGcSamples,
-);
+const automaticGcEvents = memoryOnly
+    ? []
+    : withoutForcedGc(
+        gcMonitor.events,
+        forcedGcSamples,
+    );
 
-attachGcToTicks(simulationTicks, automaticGcEvents);
+if (!memoryOnly) {
+    attachGcToTicks(simulationTicks, automaticGcEvents);
+}
 
-const simulationDurations = simulationTicks.map(
-    sample => sample.duration,
-);
+const simulationDurations = memoryOnly
+    ? []
+    : simulationTicks.map(sample => sample.duration);
 const automaticGcDurations = automaticGcEvents.map(
     event => event.duration,
 );
 
-const peakHeap = Math.max(
-    ...memorySamples.map(sample => sample.heapUsed),
-    beforeFinalGc.heapUsed,
-);
-const peakRss = Math.max(
-    ...memorySamples.map(sample => sample.rss),
-    beforeFinalGc.rss,
-);
+const peakHeap = memoryOnly
+    ? null
+    : Math.max(
+        ...memorySamples.map(sample => sample.heapUsed),
+        beforeFinalGc.heapUsed,
+    );
+const peakRss = memoryOnly
+    ? null
+    : Math.max(
+        ...memorySamples.map(sample => sample.rss),
+        beforeFinalGc.rss,
+    );
 
 console.log("=== constant-load churn workload ===");
 console.log(`cities: ${cityCount}`);
@@ -480,13 +500,15 @@ console.log(
     `route cache before clear: ${routeCacheSizeBeforeClear.toLocaleString()} routes / ${routeCacheLegsBeforeClear.toLocaleString()} legs`,
 );
 
-console.log("\n=== simulation tick latency ===");
-printDurationSummary("simulation tick", simulationDurations);
-printWorstTicks(simulationTicks, 10);
+if (!memoryOnly) {
+    console.log("\n=== simulation tick latency ===");
+    printDurationSummary("simulation tick", simulationDurations);
+    printWorstTicks(simulationTicks, 10);
 
-console.log("\n=== churn maintenance latency ===");
-printDurationSummary("maintenance", maintenanceDurations);
-printDurationSummary("full loop", totalLoopDurations);
+    console.log("\n=== churn maintenance latency ===");
+    printDurationSummary("maintenance", maintenanceDurations);
+    printDurationSummary("full loop", totalLoopDurations);
+}
 
 console.log("\n=== retained-memory checkpoints ===");
 for (const sample of retainedCheckpoints) {
@@ -516,12 +538,14 @@ printMemorySample(beforeFinalGc);
 printMemorySample(afterFinalGc);
 printMemorySample(afterCacheClear);
 printMemorySample(afterEntityClear);
-console.log(
-    `sampled heap peak: ${(peakHeap / 1024 / 1024).toFixed(2)} MiB`,
-);
-console.log(
-    `sampled RSS peak: ${(peakRss / 1024 / 1024).toFixed(2)} MiB`,
-);
+if (!memoryOnly) {
+    console.log(
+        `sampled heap peak: ${(peakHeap / 1024 / 1024).toFixed(2)} MiB`,
+    );
+    console.log(
+        `sampled RSS peak: ${(peakRss / 1024 / 1024).toFixed(2)} MiB`,
+    );
+}
 printMemoryDelta(
     "collectible garbage at end",
     afterFinalGc,
@@ -544,8 +568,12 @@ printMemoryDelta(
 );
 
 console.log("\n=== GC ===");
-console.log(
-    `observed automatic GC events: ${automaticGcEvents.length.toLocaleString()}`,
-);
-printDurationSummary("automatic GC", automaticGcDurations);
+
+if (!memoryOnly) {
+    console.log(
+        `observed automatic GC events: ${automaticGcEvents.length.toLocaleString()}`,
+    );
+    printDurationSummary("automatic GC", automaticGcDurations);
+}
+
 printForcedGc(forcedGcSamples);
