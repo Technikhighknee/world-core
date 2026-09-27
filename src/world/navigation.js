@@ -50,6 +50,7 @@ export class Navigation {
 
         this.nodeIndex = new StaticSpatialIndex(spatialCellSize);
         this.roadIndex = new StaticSpatialIndex(spatialCellSize);
+        this.maxRoadHalfWidth = 0;
 
         this.routeCacheSize = routeCacheSize;
         this.routeCacheMaxLegs = routeCacheMaxLegs;
@@ -230,10 +231,17 @@ export class Navigation {
             });
         }
 
-        const padding = width / 2;
+        this.maxRoadHalfWidth = Math.max(
+            this.maxRoadHalfWidth,
+            width / 2,
+        );
 
         for (let i = 1; i < points.length; i++) {
-            this.roadIndex.insertSegment(id, points[i - 1], points[i], padding);
+            this.roadIndex.insertSegment(
+                id,
+                points[i - 1],
+                points[i],
+            );
         }
 
         return road;
@@ -328,11 +336,14 @@ export class Navigation {
     }
 
     roadAt(position, extraTolerance = 0) {
-        const candidates = extraTolerance > 0
+        const searchRadius =
+            this.maxRoadHalfWidth + extraTolerance;
+
+        const candidates = searchRadius > 0
             ? this.roadIndex.queryRadiusInto(
                 this.roadQueryScratch,
                 position,
-                extraTolerance,
+                searchRadius,
             )
             : this.roadIndex.queryPointInto(
                 this.roadQueryScratch,
