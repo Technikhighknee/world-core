@@ -134,4 +134,14 @@ export class SpatialHash {
     queryRadius(position, radius) {
         return this.queryRadiusInto(new Set(), position, radius);
     }
+
+    membershipCount() {
+        let count = 0;
+
+        for (const cell of this.cells.values()) {
+            count += cell.size;
+        }
+
+        return count;
+    }
 }
