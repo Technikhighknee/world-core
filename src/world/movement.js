@@ -25,14 +25,15 @@ function pointIndexIsDone(index, road, reversed) {
 
 function beginJourney(world, navigation, entity, destinationNodeId, planned) {
     const route = planned.route;
+    const prefixLeg = planned.prefixLeg ?? null;
 
-    if (route.legs.length === 0 && !planned.entryPoint) {
+    if (route.legs.length === 0 && !prefixLeg && !planned.entryPoint) {
         entity.journey = null;
         world.unmarkMoving(entity.id);
         return true;
     }
 
-    const firstLeg = route.legs[0];
+    const firstLeg = prefixLeg ?? route.legs[0];
     const firstRoad = firstLeg
         ? navigation.roads.get(firstLeg.roadId)
         : null;
@@ -40,6 +41,7 @@ function beginJourney(world, navigation, entity, destinationNodeId, planned) {
     entity.journey = {
         destinationNodeId,
         route,
+        prefixLeg,
         entryPoint: planned.entryPoint,
         legIndex: 0,
         pointIndex: firstRoad
@@ -70,7 +72,13 @@ export function startJourney(world, navigation, entityId, destinationNodeId) {
 
     if (!planned) return false;
 
-    return beginJourney(world, navigation, entity, destinationNodeId, planned);
+    return beginJourney(
+        world,
+        navigation,
+        entity,
+        destinationNodeId,
+        planned,
+    );
 }
 
 export function rerouteJourney(world, navigation, entityId, destinationNodeId) {
@@ -83,13 +91,19 @@ export function stopJourney(entity, world = null) {
 }
 
 export function updateMovement(world, navigation, deltaSeconds) {
+    const refreshDynamicLod = world.hasDynamicMovementLod();
     const reclassify = world.movementReclassifyScratch;
-    reclassify.length = 0;
+
+    if (refreshDynamicLod) {
+        reclassify.length = 0;
+    }
 
     world.forEachDueMovementBatch(
         deltaSeconds,
-        (entityIds, elapsedSeconds) => {
+        (entityIds, elapsedSeconds, skipEntityIds) => {
             for (const entityId of entityIds) {
+                if (skipEntityIds?.has(entityId)) continue;
+
                 const entity = world.getEntity(entityId);
 
                 if (!entity || !entity.journey) {
@@ -99,12 +113,18 @@ export function updateMovement(world, navigation, deltaSeconds) {
 
                 moveEntity(world, navigation, entity, elapsedSeconds);
 
-                if (entity.journey) {
+                if (
+                    refreshDynamicLod &&
+                    entity.journey &&
+                    entity.simulation?.movementInterval == null
+                ) {
                     reclassify.push(entityId);
                 }
             }
         },
     );
+
+    if (!refreshDynamicLod) return;
 
     for (let i = 0; i < reclassify.length; i++) {
         world.refreshEntityMovementLod(reclassify[i]);
@@ -116,6 +136,52 @@ export function updateMovement(world, navigation, deltaSeconds) {
 function finishJourney(world, entity) {
     entity.journey = null;
     world.unmarkMoving(entity.id);
+}
+
+function advanceLeg(world, navigation, entity, journey) {
+    if (journey.prefixLeg) {
+        journey.prefixLeg = null;
+
+        const firstRouteLeg = journey.route.legs[journey.legIndex];
+
+        if (!firstRouteLeg) {
+            finishJourney(world, entity);
+            return false;
+        }
+
+        const firstRouteRoad = navigation.roads.get(firstRouteLeg.roadId);
+
+        if (!firstRouteRoad) {
+            finishJourney(world, entity);
+            return false;
+        }
+
+        journey.pointIndex = initialPointIndex(
+            firstRouteRoad,
+            firstRouteLeg,
+        );
+
+        return true;
+    }
+
+    journey.legIndex++;
+
+    const nextLeg = journey.route.legs[journey.legIndex];
+
+    if (!nextLeg) {
+        finishJourney(world, entity);
+        return false;
+    }
+
+    const nextRoad = navigation.roads.get(nextLeg.roadId);
+
+    if (!nextRoad) {
+        finishJourney(world, entity);
+        return false;
+    }
+
+    journey.pointIndex = initialPointIndex(nextRoad, nextLeg);
+    return true;
 }
 
 function moveEntity(world, navigation, entity, deltaSeconds) {
@@ -164,7 +230,8 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             break;
         }
 
-        const leg = journey.route.legs[journey.legIndex];
+        const leg = journey.prefixLeg ??
+            journey.route.legs[journey.legIndex];
 
         if (!leg) {
             finishJourney(world, entity);
@@ -179,23 +246,10 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
         }
 
         if (pointIndexIsDone(journey.pointIndex, road, leg.reversed)) {
-            journey.legIndex++;
-
-            const nextLeg = journey.route.legs[journey.legIndex];
-
-            if (!nextLeg) {
-                finishJourney(world, entity);
+            if (!advanceLeg(world, navigation, entity, journey)) {
                 break;
             }
 
-            const nextRoad = navigation.roads.get(nextLeg.roadId);
-
-            if (!nextRoad) {
-                finishJourney(world, entity);
-                break;
-            }
-
-            journey.pointIndex = initialPointIndex(nextRoad, nextLeg);
             continue;
         }
 

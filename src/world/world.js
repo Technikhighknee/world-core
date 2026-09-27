@@ -66,15 +66,12 @@ export class World {
         const explicit = entity.simulation?.movementInterval;
 
         if (explicit != null) {
-            return Math.max(0, explicit);
+            const interval = Math.max(0, explicit);
+            return interval === 0 ? null : interval;
         }
 
-        if (
-            !this.movementLodTiers ||
-            this.movementLodTiers.length === 0 ||
-            this.interestPoints.length === 0
-        ) {
-            return 0;
+        if (!this.hasDynamicMovementLod()) {
+            return null;
         }
 
         let nearestSquared = Infinity;
@@ -100,6 +97,11 @@ export class World {
 
         if (current != null) {
             this.movementBuckets.get(current)?.delete(entityId);
+            this.entityMovementIntervals.delete(entityId);
+        }
+
+        if (interval == null) {
+            return;
         }
 
         let bucket = this.movementBuckets.get(interval);
@@ -312,6 +314,13 @@ export class World {
         );
     }
 
+    hasDynamicMovementLod() {
+        return Boolean(
+            this.movementLodTiers?.length &&
+            this.interestPoints.length > 0
+        );
+    }
+
     refreshAllMovementLod() {
         for (const entityId of this.movingEntities) {
             this.refreshEntityMovementLod(entityId);
@@ -319,11 +328,23 @@ export class World {
     }
 
     forEachDueMovementBatch(deltaSeconds, callback) {
+        const scheduledCount = this.entityMovementIntervals.size;
+
+        if (scheduledCount < this.movingEntities.size) {
+            callback(
+                this.movingEntities,
+                deltaSeconds,
+                scheduledCount > 0
+                    ? this.entityMovementIntervals
+                    : null,
+            );
+        }
+
         for (const [interval, entityIds] of this.movementBuckets) {
             if (entityIds.size === 0) continue;
 
             if (interval === 0) {
-                callback(entityIds, deltaSeconds);
+                callback(entityIds, deltaSeconds, null);
                 continue;
             }
 
@@ -343,7 +364,7 @@ export class World {
                 accumulated - elapsedSeconds,
             );
 
-            callback(entityIds, elapsedSeconds);
+            callback(entityIds, elapsedSeconds, null);
         }
     }
 
@@ -396,5 +417,91 @@ export class World {
             this.createSpatialQueryBuffer(),
             options,
         );
+    }
+
+    getDiagnostics() {
+        let movementBucketMemberships = 0;
+
+        for (const bucket of this.movementBuckets.values()) {
+            movementBucketMemberships += bucket.size;
+        }
+
+        let radiusTrackedEntities = 0;
+
+        for (const count of this.radiusCounts.values()) {
+            radiusTrackedEntities += count;
+        }
+
+        return {
+            entityCount: this.entities.size,
+            spatialIndexedEntities: this.spatial.entityRanges.size,
+            spatialCellCount: this.spatial.cells.size,
+            spatialMemberships: this.spatial.membershipCount(),
+            movingEntities: this.movingEntities.size,
+            movementIntervalEntries: this.entityMovementIntervals.size,
+            movementBucketCount: this.movementBuckets.size,
+            movementBucketMemberships,
+            radiusTrackedEntities,
+            radiusCountEntries: this.radiusCounts.size,
+            maxEntityRadius: this.maxEntityRadius,
+        };
+    }
+
+    assertInternalConsistency() {
+        const diagnostics = this.getDiagnostics();
+
+        if (
+            diagnostics.spatialIndexedEntities !==
+            diagnostics.entityCount
+        ) {
+            throw new Error(
+                `Spatial index drift: ${diagnostics.spatialIndexedEntities} indexed for ${diagnostics.entityCount} entities`,
+            );
+        }
+
+        if (
+            diagnostics.radiusTrackedEntities !==
+            diagnostics.entityCount
+        ) {
+            throw new Error(
+                `Radius tracking drift: ${diagnostics.radiusTrackedEntities} tracked for ${diagnostics.entityCount} entities`,
+            );
+        }
+
+        if (
+            diagnostics.movementBucketMemberships !==
+            diagnostics.movementIntervalEntries
+        ) {
+            throw new Error(
+                `Movement scheduling drift: ${diagnostics.movementBucketMemberships} bucket memberships for ${diagnostics.movementIntervalEntries} scheduled movers`,
+            );
+        }
+
+        if (
+            diagnostics.movementIntervalEntries >
+            diagnostics.movingEntities
+        ) {
+            throw new Error(
+                `Movement scheduling overflow: ${diagnostics.movementIntervalEntries} scheduled movers for ${diagnostics.movingEntities} active movers`,
+            );
+        }
+
+        for (const entityId of this.movingEntities) {
+            if (!this.entities.has(entityId)) {
+                throw new Error(
+                    `Moving entity missing from registry: ${entityId}`,
+                );
+            }
+        }
+
+        for (const entityId of this.entityMovementIntervals.keys()) {
+            if (!this.movingEntities.has(entityId)) {
+                throw new Error(
+                    `Scheduled entity is not moving: ${entityId}`,
+                );
+            }
+        }
+
+        return diagnostics;
     }
 }

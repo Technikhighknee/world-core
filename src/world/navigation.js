@@ -371,7 +371,9 @@ export class Navigation {
 
             return {
                 route,
+                prefixLeg: null,
                 entryPoint: null,
+                estimatedSeconds: route.estimatedSeconds,
             };
         }
 
@@ -393,27 +395,24 @@ export class Navigation {
             const totalSeconds =
                 entrySeconds + partialSeconds + baseRoute.estimatedSeconds;
 
-            const partialLeg = partialDistance > EPSILON
-                ? [{
+            const prefixLeg = partialDistance > EPSILON
+                ? {
                     roadId: road.id,
                     reversed,
                     startSegmentIndex: hit.segmentIndex,
-                }]
-                : [];
+                }
+                : null;
 
             const candidate = {
-                route: {
-                    startNodeId: null,
-                    destinationNodeId,
-                    legs: [...partialLeg, ...baseRoute.legs],
-                    estimatedSeconds: totalSeconds,
-                },
+                route: baseRoute,
+                prefixLeg,
                 entryPoint: distance(position, hit.point) > EPSILON
                     ? { ...hit.point }
                     : null,
+                estimatedSeconds: totalSeconds,
             };
 
-            if (!best || totalSeconds < best.route.estimatedSeconds) {
+            if (!best || totalSeconds < best.estimatedSeconds) {
                 best = candidate;
             }
         };
