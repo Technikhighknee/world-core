@@ -215,6 +215,12 @@ const afterPopulation = await forceGc(
     forcedGcSamples,
 );
 
+const diagnosticSnapshots = [{
+    label: "population",
+    tick: 0,
+    ...world.assertInternalConsistency(),
+}];
+
 const simulationTicks = [];
 const maintenanceDurations = [];
 const totalLoopDurations = [];
@@ -370,9 +376,22 @@ for (let tick = 1; tick <= ticks; tick++) {
                 forcedGcSamples,
             ),
         );
+
+        diagnosticSnapshots.push({
+            label: `checkpoint ${tick}`,
+            tick,
+            ...world.assertInternalConsistency(),
+        });
+
         await gcMonitor.flush();
     }
 }
+
+diagnosticSnapshots.push({
+    label: "run end",
+    tick: ticks,
+    ...world.assertInternalConsistency(),
+});
 
 const beforeFinalGc = sampleMemory("run end before GC", ticks);
 const afterFinalGc = await forceGc(
@@ -397,6 +416,12 @@ const afterCacheClear = await forceGc(
 for (const entityId of world.entities.keys()) {
     world.removeEntity(entityId);
 }
+
+diagnosticSnapshots.push({
+    label: "entities cleared",
+    tick: ticks,
+    ...world.assertInternalConsistency(),
+});
 
 const afterEntityClear = await forceGc(
     "entities cleared post-GC",
@@ -466,6 +491,20 @@ printDurationSummary("full loop", totalLoopDurations);
 console.log("\n=== retained-memory checkpoints ===");
 for (const sample of retainedCheckpoints) {
     printMemorySample(sample);
+}
+
+console.log("\n=== world structure diagnostics ===");
+for (const snapshot of diagnosticSnapshots) {
+    console.log(
+        `${snapshot.label}: entities=${snapshot.entityCount.toLocaleString()} ` +
+        `spatialIndexed=${snapshot.spatialIndexedEntities.toLocaleString()} ` +
+        `spatialCells=${snapshot.spatialCellCount.toLocaleString()} ` +
+        `spatialMemberships=${snapshot.spatialMemberships.toLocaleString()} ` +
+        `movers=${snapshot.movingEntities.toLocaleString()} ` +
+        `intervals=${snapshot.movementIntervalEntries.toLocaleString()} ` +
+        `bucketMemberships=${snapshot.movementBucketMemberships.toLocaleString()} ` +
+        `radiusTracked=${snapshot.radiusTrackedEntities.toLocaleString()}`,
+    );
 }
 
 console.log("\n=== final memory decomposition ===");
