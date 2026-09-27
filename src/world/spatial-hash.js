@@ -1,11 +1,3 @@
-function sameRange(a, b) {
-    return a && b &&
-        a.startX === b.startX &&
-        a.endX === b.endX &&
-        a.startY === b.startY &&
-        a.endY === b.endY;
-}
-
 export class SpatialHash {
     constructor(cellSize = 20) {
         if (!(cellSize > 0)) {
@@ -23,15 +15,6 @@ export class SpatialHash {
 
     #key(x, y) {
         return `${x}:${y}`;
-    }
-
-    #rangeForBounds(minX, minY, maxX, maxY) {
-        return {
-            startX: this.#coordinate(minX),
-            endX: this.#coordinate(maxX),
-            startY: this.#coordinate(minY),
-            endY: this.#coordinate(maxY),
-        };
     }
 
     #addToRange(entityId, range) {
@@ -74,16 +57,32 @@ export class SpatialHash {
     }
 
     upsertBounds(entityId, minX, minY, maxX, maxY) {
-        const nextRange = this.#rangeForBounds(minX, minY, maxX, maxY);
+        const startX = this.#coordinate(minX);
+        const endX = this.#coordinate(maxX);
+        const startY = this.#coordinate(minY);
+        const endY = this.#coordinate(maxY);
         const currentRange = this.entityRanges.get(entityId);
 
-        if (sameRange(currentRange, nextRange)) {
+        if (
+            currentRange &&
+            currentRange.startX === startX &&
+            currentRange.endX === endX &&
+            currentRange.startY === startY &&
+            currentRange.endY === endY
+        ) {
             return false;
         }
 
         if (currentRange) {
             this.#removeFromRange(entityId, currentRange);
         }
+
+        const nextRange = {
+            startX,
+            endX,
+            startY,
+            endY,
+        };
 
         this.#addToRange(entityId, nextRange);
         this.entityRanges.set(entityId, nextRange);
@@ -101,10 +100,14 @@ export class SpatialHash {
 
     queryBoundsInto(result, minX, minY, maxX, maxY) {
         result.clear();
-        const range = this.#rangeForBounds(minX, minY, maxX, maxY);
 
-        for (let y = range.startY; y <= range.endY; y++) {
-            for (let x = range.startX; x <= range.endX; x++) {
+        const startX = this.#coordinate(minX);
+        const endX = this.#coordinate(maxX);
+        const startY = this.#coordinate(minY);
+        const endY = this.#coordinate(maxY);
+
+        for (let y = startY; y <= endY; y++) {
+            for (let x = startX; x <= endX; x++) {
                 const cell = this.cells.get(this.#key(x, y));
                 if (!cell) continue;
 
