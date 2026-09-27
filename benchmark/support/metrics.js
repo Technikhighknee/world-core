@@ -23,6 +23,16 @@ export function mib(bytes) {
 export function sampleMemory(label, tick = null) {
     const usage = process.memoryUsage();
     const heap = v8.getHeapStatistics();
+    const spaces = Object.fromEntries(
+        v8.getHeapSpaceStatistics().map(space => [
+            space.space_name,
+            {
+                used: space.space_used_size,
+                size: space.space_size,
+                available: space.space_available_size,
+            },
+        ]),
+    );
 
     return {
         label,
@@ -38,6 +48,7 @@ export function sampleMemory(label, tick = null) {
         heapSizeLimit: heap.heap_size_limit,
         mallocedMemory: heap.malloced_memory,
         externalMemory: heap.external_memory,
+        spaces,
     };
 }
 
@@ -132,9 +143,17 @@ export function printDurationSummary(label, values) {
 }
 
 export function printMemorySample(sample) {
+    const oldSpace = sample.spaces.old_space?.used ?? 0;
+    const largeObjectSpace = sample.spaces.large_object_space?.used ?? 0;
+    const newSpace = sample.spaces.new_space?.used ?? 0;
+
     console.log(
-        `${sample.label}: heap=${mib(sample.heapUsed).toFixed(2)} MiB, ` +
+        `${sample.label}: heapUsed=${mib(sample.heapUsed).toFixed(2)} MiB, ` +
+        `heapTotal=${mib(sample.heapTotal).toFixed(2)} MiB, ` +
         `rss=${mib(sample.rss).toFixed(2)} MiB, ` +
+        `oldSpace=${mib(oldSpace).toFixed(2)} MiB, ` +
+        `largeObjectSpace=${mib(largeObjectSpace).toFixed(2)} MiB, ` +
+        `newSpace=${mib(newSpace).toFixed(2)} MiB, ` +
         `external=${mib(sample.external).toFixed(2)} MiB, ` +
         `arrayBuffers=${mib(sample.arrayBuffers).toFixed(2)} MiB`,
     );
