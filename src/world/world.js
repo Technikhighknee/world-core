@@ -14,7 +14,7 @@ export class World {
         this.radiusCounts = new Map();
         this.maxEntityRadius = 0;
 
-        this.movingEntities = new Set();
+        this.movingEntities = new Map();
         this.movementBuckets = new Map();
         this.movementAccumulators = new Map();
         this.entityMovementIntervals = new Map();
@@ -90,13 +90,14 @@ export class World {
         return this.movementLodTiers[this.movementLodTiers.length - 1].interval;
     }
 
-    #assignMovementInterval(entityId, interval) {
+    #assignMovementInterval(entity, interval) {
+        const entityId = entity.id;
         const current = this.entityMovementIntervals.get(entityId);
 
         if (current === interval) return;
 
         if (current != null) {
-            this.movementBuckets.get(current)?.delete(entityId);
+            this.movementBuckets.get(current)?.delete(entity);
             this.entityMovementIntervals.delete(entityId);
         }
 
@@ -112,7 +113,7 @@ export class World {
             this.movementAccumulators.set(interval, 0);
         }
 
-        bucket.add(entityId);
+        bucket.add(entity);
         this.entityMovementIntervals.set(entityId, interval);
     }
 
@@ -176,6 +177,10 @@ export class World {
             throw new Error(`Unknown entity: ${entityId}`);
         }
 
+        this.setEntityPositionXY(entity, x, y);
+    }
+
+    setEntityPositionXY(entity, x, y) {
         entity.position.x = x;
         entity.position.y = y;
 
@@ -284,32 +289,34 @@ export class World {
             throw new Error(`Unknown entity: ${entityId}`);
         }
 
-        this.movingEntities.add(entityId);
+        this.movingEntities.set(entityId, entity);
         this.#assignMovementInterval(
-            entityId,
+            entity,
             this.#movementIntervalFor(entity),
         );
     }
 
     unmarkMoving(entityId) {
+        const entity = this.movingEntities.get(entityId);
         this.movingEntities.delete(entityId);
 
         const interval = this.entityMovementIntervals.get(entityId);
 
         if (interval != null) {
-            this.movementBuckets.get(interval)?.delete(entityId);
+            if (entity) {
+                this.movementBuckets.get(interval)?.delete(entity);
+            }
+
             this.entityMovementIntervals.delete(entityId);
         }
     }
 
     refreshEntityMovementLod(entityId) {
-        if (!this.movingEntities.has(entityId)) return;
-
-        const entity = this.entities.get(entityId);
+        const entity = this.movingEntities.get(entityId);
         if (!entity) return;
 
         this.#assignMovementInterval(
-            entityId,
+            entity,
             this.#movementIntervalFor(entity),
         );
     }
@@ -322,8 +329,11 @@ export class World {
     }
 
     refreshAllMovementLod() {
-        for (const entityId of this.movingEntities) {
-            this.refreshEntityMovementLod(entityId);
+        for (const entity of this.movingEntities.values()) {
+            this.#assignMovementInterval(
+                entity,
+                this.#movementIntervalFor(entity),
+            );
         }
     }
 
@@ -332,7 +342,7 @@ export class World {
 
         if (scheduledCount < this.movingEntities.size) {
             callback(
-                this.movingEntities,
+                this.movingEntities.values(),
                 deltaSeconds,
                 scheduledCount > 0
                     ? this.entityMovementIntervals
@@ -488,10 +498,10 @@ export class World {
             );
         }
 
-        for (const entityId of this.movingEntities) {
-            if (!this.entities.has(entityId)) {
+        for (const [entityId, entity] of this.movingEntities) {
+            if (this.entities.get(entityId) !== entity) {
                 throw new Error(
-                    `Moving entity missing from registry: ${entityId}`,
+                    `Moving entity registry mismatch: ${entityId}`,
                 );
             }
         }
