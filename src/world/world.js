@@ -142,7 +142,7 @@ export class World {
         this.#trackRadius(radius);
 
         this.entities.set(stored.id, stored);
-        this.spatial.upsert(stored.id, stored.position, radius);
+        this.spatial.upsertPoint(stored.id, stored.position);
 
         if (stored.journey) {
             this.markMoving(stored.id);
@@ -184,10 +184,9 @@ export class World {
         entity.position.x = x;
         entity.position.y = y;
 
-        this.spatial.upsert(
+        this.spatial.upsertPoint(
             entity.id,
             entity.position,
-            entity.body?.radius ?? 0,
         );
     }
 
@@ -209,7 +208,6 @@ export class World {
 
         this.#untrackRadius(previous);
         this.#trackRadius(radius);
-        this.spatial.upsert(entity.id, entity.position, radius);
     }
 
     configureMovementLod(tiers) {
