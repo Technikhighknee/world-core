@@ -10,7 +10,7 @@ The world stores actual entity coordinates. Navigation is a separate graph used 
 - Active movement is tracked separately from the full population.
 - Movement advances numeric `x/y` state without temporary Vec2/object allocations in the hot loop and commits each entity position at most once per processed movement update.
 - Movement LOD supports full-detail nearby movers and coarse scheduled updates for distant movers.
-- Dynamic entity lookups use a spatial hash. Moving inside the same occupied cell range does not rewrite hash buckets.
+- Dynamic entity lookups use a spatial hash. World entities are indexed by center cell only; body radius is handled by query expansion plus exact distance checks, so large bodies remain query-correct without duplicating dynamic memberships across neighboring cells. Moving inside the same center cell does not rewrite hash buckets.
 - Normal cell coordinates use packed numeric keys instead of transient string keys, and singleton cells store the entity ID directly instead of allocating a Set.
 - Reusable spatial query buffers are available through `createSpatialQueryBuffer()` and `queryRadiusInto()`.
 - `maxEntityRadius` shrinks when large entities are removed or resized.

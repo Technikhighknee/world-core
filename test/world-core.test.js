@@ -664,3 +664,58 @@ test("roadAt finds road width across a spatial cell boundary without padded inde
     assert.equal(hit?.road.id, "boundary-road");
     assert.ok(hit.distance <= 2);
 });
+
+
+test("world spatial index stores dynamic entities by center only", () => {
+    const world = new World({ spatialCellSize: 10 });
+
+    world.addEntity({
+        id: "large",
+        position: { x: 9.9, y: 9.9 },
+        body: { radius: 5 },
+    });
+
+    const diagnostics = world.assertInternalConsistency();
+
+    assert.equal(diagnostics.entityCount, 1);
+    assert.equal(diagnostics.spatialIndexedEntities, 1);
+    assert.equal(diagnostics.spatialMemberships, 1);
+});
+
+test("center-only world indexing still finds bodies intersecting a radius query", () => {
+    const world = new World({ spatialCellSize: 10 });
+
+    world.addEntity({
+        id: "large",
+        position: { x: 20, y: 0 },
+        body: { radius: 10 },
+    });
+
+    const nearby = world.queryRadius(
+        { x: 0, y: 0 },
+        10,
+    );
+
+    assert.deepEqual(nearby.map(entity => entity.id), ["large"]);
+});
+
+test("changing entity radius does not rewrite its center cell", () => {
+    const world = new World({ spatialCellSize: 10 });
+
+    world.addEntity({
+        id: "person",
+        position: { x: 5, y: 5 },
+        body: { radius: 0.35 },
+    });
+
+    const range = world.spatial.entityRanges.get("person");
+
+    world.setEntityRadius("person", 25);
+
+    assert.strictEqual(
+        world.spatial.entityRanges.get("person"),
+        range,
+    );
+    assert.equal(world.maxEntityRadius, 25);
+    assert.equal(world.spatial.membershipCount(), 1);
+});

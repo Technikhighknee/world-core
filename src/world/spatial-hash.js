@@ -99,7 +99,42 @@ export class SpatialHash {
         }
     }
 
+    upsertPoint(entityId, position) {
+        const x = this.#coordinate(position.x);
+        const y = this.#coordinate(position.y);
+        const currentRange = this.entityRanges.get(entityId);
+
+        if (
+            currentRange &&
+            currentRange.startX === x &&
+            currentRange.endX === x &&
+            currentRange.startY === y &&
+            currentRange.endY === y
+        ) {
+            return false;
+        }
+
+        if (currentRange) {
+            this.#removeFromRange(entityId, currentRange);
+        }
+
+        const nextRange = {
+            startX: x,
+            endX: x,
+            startY: y,
+            endY: y,
+        };
+
+        addCellMember(this.cells, cellKey(x, y), entityId);
+        this.entityRanges.set(entityId, nextRange);
+        return true;
+    }
+
     upsert(entityId, position, radius = 0) {
+        if (!(radius > 0)) {
+            return this.upsertPoint(entityId, position);
+        }
+
         return this.upsertBounds(
             entityId,
             position.x - radius,
