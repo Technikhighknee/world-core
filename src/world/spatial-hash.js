@@ -1,3 +1,73 @@
+const CELL_KEY_STRIDE = 67108864;
+const CELL_KEY_OFFSET = 33554432;
+
+function cellKey(x, y) {
+    const packedX = x + CELL_KEY_OFFSET;
+    const packedY = y + CELL_KEY_OFFSET;
+
+    if (
+        packedX >= 0 &&
+        packedX < CELL_KEY_STRIDE &&
+        packedY >= 0 &&
+        packedY < CELL_KEY_STRIDE
+    ) {
+        return packedX * CELL_KEY_STRIDE + packedY;
+    }
+
+    return `${x}:${y}`;
+}
+
+function addCellMember(cells, key, id) {
+    const cell = cells.get(key);
+
+    if (cell === undefined) {
+        cells.set(key, id);
+        return;
+    }
+
+    if (cell instanceof Set) {
+        cell.add(id);
+        return;
+    }
+
+    if (cell !== id) {
+        cells.set(key, new Set([cell, id]));
+    }
+}
+
+function removeCellMember(cells, key, id) {
+    const cell = cells.get(key);
+
+    if (cell === undefined) return;
+
+    if (!(cell instanceof Set)) {
+        if (cell === id) cells.delete(key);
+        return;
+    }
+
+    cell.delete(id);
+
+    if (cell.size === 0) {
+        cells.delete(key);
+        return;
+    }
+
+    if (cell.size === 1) {
+        cells.set(key, cell.values().next().value);
+    }
+}
+
+function addCellMembersToResult(cell, result) {
+    if (cell === undefined) return;
+
+    if (cell instanceof Set) {
+        for (const id of cell) result.add(id);
+        return;
+    }
+
+    result.add(cell);
+}
+
 export class SpatialHash {
     constructor(cellSize = 20) {
         if (!(cellSize > 0)) {
@@ -13,22 +83,10 @@ export class SpatialHash {
         return Math.floor(value / this.cellSize);
     }
 
-    #key(x, y) {
-        return `${x}:${y}`;
-    }
-
     #addToRange(entityId, range) {
         for (let y = range.startY; y <= range.endY; y++) {
             for (let x = range.startX; x <= range.endX; x++) {
-                const key = this.#key(x, y);
-                let cell = this.cells.get(key);
-
-                if (!cell) {
-                    cell = new Set();
-                    this.cells.set(key, cell);
-                }
-
-                cell.add(entityId);
+                addCellMember(this.cells, cellKey(x, y), entityId);
             }
         }
     }
@@ -36,12 +94,7 @@ export class SpatialHash {
     #removeFromRange(entityId, range) {
         for (let y = range.startY; y <= range.endY; y++) {
             for (let x = range.startX; x <= range.endX; x++) {
-                const key = this.#key(x, y);
-                const cell = this.cells.get(key);
-                if (!cell) continue;
-
-                cell.delete(entityId);
-                if (cell.size === 0) this.cells.delete(key);
+                removeCellMember(this.cells, cellKey(x, y), entityId);
             }
         }
     }
@@ -108,12 +161,10 @@ export class SpatialHash {
 
         for (let y = startY; y <= endY; y++) {
             for (let x = startX; x <= endX; x++) {
-                const cell = this.cells.get(this.#key(x, y));
-                if (!cell) continue;
-
-                for (const entityId of cell) {
-                    result.add(entityId);
-                }
+                addCellMembersToResult(
+                    this.cells.get(cellKey(x, y)),
+                    result,
+                );
             }
         }
 
@@ -142,7 +193,17 @@ export class SpatialHash {
         let count = 0;
 
         for (const cell of this.cells.values()) {
-            count += cell.size;
+            count += cell instanceof Set ? cell.size : 1;
+        }
+
+        return count;
+    }
+
+    multiOccupancyCellCount() {
+        let count = 0;
+
+        for (const cell of this.cells.values()) {
+            if (cell instanceof Set) count++;
         }
 
         return count;

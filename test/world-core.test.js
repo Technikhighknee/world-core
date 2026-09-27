@@ -598,3 +598,60 @@ test("dynamic movement LOD schedules movers while default movement does not", ()
     assert.equal(lodWorld.entityMovementIntervals.get("lod"), 10);
     assert.equal(lodWorld.movementBuckets.get(10)?.has("lod"), true);
 });
+
+
+test("dynamic spatial cells collapse back to singleton storage", () => {
+    const spatial = new SpatialHash(10);
+
+    spatial.upsert("a", { x: 5, y: 5 }, 0);
+    assert.equal(
+        [...spatial.cells.values()].some(cell => cell instanceof Set),
+        false,
+    );
+
+    spatial.upsert("b", { x: 6, y: 5 }, 0);
+    assert.equal(
+        [...spatial.cells.values()].some(cell => cell instanceof Set),
+        true,
+    );
+
+    spatial.remove("b");
+
+    assert.equal(spatial.queryRadius({ x: 5, y: 5 }, 1).has("a"), true);
+    assert.equal(
+        [...spatial.cells.values()].some(cell => cell instanceof Set),
+        false,
+    );
+});
+
+test("static point memberships avoid per-item and per-cell sets when singleton", () => {
+    const index = new StaticSpatialIndex(10);
+
+    index.insertPoint("a", { x: 5, y: 5 });
+    index.insertPoint("b", { x: 25, y: 5 });
+
+    assert.equal(index.itemCells.get("a") instanceof Set, false);
+    assert.equal(index.itemCells.get("b") instanceof Set, false);
+    assert.equal(index.multiOccupancyCellCount(), 0);
+
+    assert.equal(index.queryPoint({ x: 5, y: 5 }).has("a"), true);
+    assert.equal(index.queryPoint({ x: 25, y: 5 }).has("b"), true);
+});
+
+test("roadAt finds road width across a spatial cell boundary without padded indexing", () => {
+    const navigation = new Navigation({ spatialCellSize: 10 });
+
+    navigation.addNode({ id: "a", x: 0, y: 9 });
+    navigation.addNode({ id: "b", x: 100, y: 9 });
+    navigation.addRoad({
+        id: "boundary-road",
+        from: "a",
+        to: "b",
+        width: 4,
+    });
+
+    const hit = navigation.roadAt({ x: 50, y: 10.5 });
+
+    assert.equal(hit?.road.id, "boundary-road");
+    assert.ok(hit.distance <= 2);
+});

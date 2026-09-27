@@ -220,6 +220,12 @@ console.log(`cities: ${cityCount}`);
 console.log(`nodes: ${navigation.nodes.size.toLocaleString()}`);
 console.log(`roads: ${navigation.roads.size.toLocaleString()}`);
 console.log(
+    `road index cells: ${navigation.roadIndex.cells.size.toLocaleString()}`,
+);
+console.log(
+    `road index multi-occupancy cells: ${navigation.roadIndex.multiOccupancyCellCount().toLocaleString()}`,
+);
+console.log(
     `road index memberships: ${navigation.roadIndex.membershipCount().toLocaleString()}`,
 );
 console.log(

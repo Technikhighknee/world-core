@@ -1,3 +1,79 @@
+const CELL_KEY_STRIDE = 67108864;
+const CELL_KEY_OFFSET = 33554432;
+
+function cellKey(x, y) {
+    const packedX = x + CELL_KEY_OFFSET;
+    const packedY = y + CELL_KEY_OFFSET;
+
+    if (
+        packedX >= 0 &&
+        packedX < CELL_KEY_STRIDE &&
+        packedY >= 0 &&
+        packedY < CELL_KEY_STRIDE
+    ) {
+        return packedX * CELL_KEY_STRIDE + packedY;
+    }
+
+    return `${x}:${y}`;
+}
+
+function hasMembership(value, member) {
+    if (value === undefined) return false;
+    if (value instanceof Set) return value.has(member);
+    return value === member;
+}
+
+function addMembership(map, key, member) {
+    const value = map.get(key);
+
+    if (value === undefined) {
+        map.set(key, member);
+        return;
+    }
+
+    if (value instanceof Set) {
+        value.add(member);
+        return;
+    }
+
+    if (value !== member) {
+        map.set(key, new Set([value, member]));
+    }
+}
+
+function removeMembership(map, key, member) {
+    const value = map.get(key);
+
+    if (value === undefined) return;
+
+    if (!(value instanceof Set)) {
+        if (value === member) map.delete(key);
+        return;
+    }
+
+    value.delete(member);
+
+    if (value.size === 0) {
+        map.delete(key);
+        return;
+    }
+
+    if (value.size === 1) {
+        map.set(key, value.values().next().value);
+    }
+}
+
+function forEachMembership(value, callback) {
+    if (value === undefined) return;
+
+    if (value instanceof Set) {
+        for (const member of value) callback(member);
+        return;
+    }
+
+    callback(value);
+}
+
 export class StaticSpatialIndex {
     constructor(cellSize = 50) {
         if (!(cellSize > 0)) {
@@ -13,30 +89,14 @@ export class StaticSpatialIndex {
         return Math.floor(value / this.cellSize);
     }
 
-    #key(x, y) {
-        return `${x}:${y}`;
-    }
-
     #insertCell(id, x, y) {
-        const key = this.#key(x, y);
-        let occupied = this.itemCells.get(id);
+        const key = cellKey(x, y);
+        const occupied = this.itemCells.get(id);
 
-        if (!occupied) {
-            occupied = new Set();
-            this.itemCells.set(id, occupied);
-        }
+        if (hasMembership(occupied, key)) return;
 
-        if (occupied.has(key)) return;
-
-        let cell = this.cells.get(key);
-
-        if (!cell) {
-            cell = new Set();
-            this.cells.set(key, cell);
-        }
-
-        cell.add(id);
-        occupied.add(key);
+        addMembership(this.cells, key, id);
+        addMembership(this.itemCells, id, key);
     }
 
     #insertPaddedCell(id, x, y, paddingCells) {
@@ -129,15 +189,11 @@ export class StaticSpatialIndex {
 
     remove(id) {
         const occupied = this.itemCells.get(id);
-        if (!occupied) return false;
+        if (occupied === undefined) return false;
 
-        for (const key of occupied) {
-            const cell = this.cells.get(key);
-            if (!cell) continue;
-
-            cell.delete(id);
-            if (cell.size === 0) this.cells.delete(key);
-        }
+        forEachMembership(occupied, key => {
+            removeMembership(this.cells, key, id);
+        });
 
         this.itemCells.delete(id);
         return true;
@@ -153,12 +209,15 @@ export class StaticSpatialIndex {
 
         for (let y = startY; y <= endY; y++) {
             for (let x = startX; x <= endX; x++) {
-                const cell = this.cells.get(this.#key(x, y));
-                if (!cell) continue;
+                const cell = this.cells.get(cellKey(x, y));
+                if (cell === undefined) continue;
 
-                for (const id of cell) {
-                    result.add(id);
+                if (cell instanceof Set) {
+                    for (const id of cell) result.add(id);
+                    continue;
                 }
+
+                result.add(cell);
             }
         }
 
@@ -170,7 +229,13 @@ export class StaticSpatialIndex {
     }
 
     queryPointInto(result, position) {
-        return this.queryBoundsInto(result, position.x, position.y, position.x, position.y);
+        return this.queryBoundsInto(
+            result,
+            position.x,
+            position.y,
+            position.x,
+            position.y,
+        );
     }
 
     queryPoint(position) {
@@ -195,7 +260,17 @@ export class StaticSpatialIndex {
         let count = 0;
 
         for (const occupied of this.itemCells.values()) {
-            count += occupied.size;
+            count += occupied instanceof Set ? occupied.size : 1;
+        }
+
+        return count;
+    }
+
+    multiOccupancyCellCount() {
+        let count = 0;
+
+        for (const cell of this.cells.values()) {
+            if (cell instanceof Set) count++;
         }
 
         return count;

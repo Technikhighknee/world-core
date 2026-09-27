@@ -437,6 +437,8 @@ export class World {
             spatialIndexedEntities: this.spatial.entityRanges.size,
             spatialCellCount: this.spatial.cells.size,
             spatialMemberships: this.spatial.membershipCount(),
+            spatialMultiOccupancyCells:
+                this.spatial.multiOccupancyCellCount(),
             movingEntities: this.movingEntities.size,
             movementIntervalEntries: this.entityMovementIntervals.size,
             movementBucketCount: this.movementBuckets.size,
