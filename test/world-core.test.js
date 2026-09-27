@@ -27,8 +27,14 @@ test("spatial hash keeps queries correct while entities move within and across c
     spatial.upsert("person", { x: 1, y: 1 }, 0.35);
     assert.deepEqual([...spatial.queryRadius({ x: 1, y: 1 }, 1)], ["person"]);
 
+    const rangeBefore = spatial.entityRanges.get("person");
     const changedWithinCell = spatial.upsert("person", { x: 2, y: 2 }, 0.35);
+
     assert.equal(changedWithinCell, false);
+    assert.strictEqual(
+        spatial.entityRanges.get("person"),
+        rangeBefore,
+    );
 
     const changedAcrossCell = spatial.upsert("person", { x: 21, y: 2 }, 0.35);
     assert.equal(changedAcrossCell, true);
@@ -99,6 +105,8 @@ test("only active movers are tracked and completed journeys leave the active set
 
     assert.equal(world.entities.size, 1001);
     assert.equal(world.movingEntities.size, 1);
+    assert.equal(world.entityMovementIntervals.size, 0);
+    assert.equal(world.movementBuckets.size, 0);
 
     stepSimulation(world, navigation, 10);
 
@@ -479,8 +487,8 @@ test("world diagnostics detect and report consistent index membership", () => {
     assert.equal(diagnostics.entityCount, 2);
     assert.equal(diagnostics.spatialIndexedEntities, 2);
     assert.equal(diagnostics.movingEntities, 1);
-    assert.equal(diagnostics.movementIntervalEntries, 1);
-    assert.equal(diagnostics.movementBucketMemberships, 1);
+    assert.equal(diagnostics.movementIntervalEntries, 0);
+    assert.equal(diagnostics.movementBucketMemberships, 0);
     assert.equal(diagnostics.radiusTrackedEntities, 2);
 
     world.removeEntity("walker");
@@ -494,4 +502,99 @@ test("world diagnostics detect and report consistent index membership", () => {
     assert.equal(empty.movementIntervalEntries, 0);
     assert.equal(empty.movementBucketMemberships, 0);
     assert.equal(empty.radiusTrackedEntities, 0);
+});
+
+
+test("mid-road journeys share cached base routes instead of copying route legs", () => {
+    const world = new World({ spatialCellSize: 10 });
+    const navigation = new Navigation({ routeCacheSize: 100 });
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+    navigation.addNode({ id: "c", x: 200, y: 0 });
+
+    navigation.addRoad({
+        id: "ab",
+        from: "a",
+        to: "b",
+        shape: [
+            { x: 25, y: 0 },
+            { x: 50, y: 0 },
+            { x: 75, y: 0 },
+        ],
+    });
+
+    navigation.addRoad({
+        id: "bc",
+        from: "b",
+        to: "c",
+    });
+
+    const mobility = {
+        profileId: "mid-road-test",
+        speed: 1,
+    };
+
+    world.addEntity({
+        id: "one",
+        position: { x: 40, y: 0 },
+        mobility,
+    });
+
+    world.addEntity({
+        id: "two",
+        position: { x: 60, y: 0 },
+        mobility,
+    });
+
+    assert.equal(startJourney(world, navigation, "one", "c"), true);
+    assert.equal(startJourney(world, navigation, "two", "c"), true);
+
+    const one = world.getEntity("one").journey;
+    const two = world.getEntity("two").journey;
+
+    assert.strictEqual(one.route, two.route);
+    assert.deepEqual(one.route.legs, [
+        { roadId: "bc", reversed: false },
+    ]);
+    assert.equal(one.prefixLeg.roadId, "ab");
+    assert.equal(two.prefixLeg.roadId, "ab");
+    assert.notStrictEqual(one.prefixLeg, two.prefixLeg);
+});
+
+test("dynamic movement LOD schedules movers while default movement does not", () => {
+    const fullRateWorld = new World();
+    const navigation = buildLineNavigation(100);
+
+    fullRateWorld.addEntity({
+        id: "full-rate",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(fullRateWorld, navigation, "full-rate", "b");
+
+    assert.equal(fullRateWorld.movingEntities.size, 1);
+    assert.equal(fullRateWorld.entityMovementIntervals.size, 0);
+    assert.equal(fullRateWorld.movementBuckets.size, 0);
+
+    const lodWorld = new World({
+        movementLodTiers: [
+            { maxDistance: 10, interval: 0 },
+            { maxDistance: Infinity, interval: 10 },
+        ],
+        interestPoints: [{ x: 1000, y: 0 }],
+    });
+
+    lodWorld.addEntity({
+        id: "lod",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(lodWorld, navigation, "lod", "b");
+
+    assert.equal(lodWorld.movingEntities.size, 1);
+    assert.equal(lodWorld.entityMovementIntervals.get("lod"), 10);
+    assert.equal(lodWorld.movementBuckets.get(10)?.has("lod"), true);
 });
