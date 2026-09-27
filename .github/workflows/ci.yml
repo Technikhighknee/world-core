@@ -7,7 +7,7 @@ on:
     branches: [master]
 
 jobs:
-  test:
+  unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,3 +15,35 @@ jobs:
         with:
           node-version: 22
       - run: npm test
+
+  benchmark-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Scalability benchmark smoke
+        env:
+          BENCH_CITIES: 2
+          BENCH_GRID_SIZE: 6
+          BENCH_ENTITIES_PER_CITY: 100
+          BENCH_MOVERS_PER_CITY: 30
+          BENCH_TICKS: 20
+          BENCH_ROUTE_QUERIES: 50
+          BENCH_MEMORY_SAMPLE_EVERY: 5
+        run: npm run bench
+      - name: Churn benchmark smoke
+        env:
+          CHURN_CITIES: 2
+          CHURN_GRID_SIZE: 6
+          CHURN_ENTITIES: 200
+          CHURN_MOVERS: 100
+          CHURN_TICKS: 20
+          CHURN_REROUTES_PER_TICK: 5
+          CHURN_STOP_STARTS_PER_TICK: 5
+          CHURN_MOVER_REPLACEMENTS_PER_TICK: 2
+          CHURN_IDLE_REPLACEMENTS_PER_TICK: 2
+          CHURN_RETENTION_CHECK_EVERY: 10
+          CHURN_MEMORY_SAMPLE_EVERY: 5
+        run: npm run bench:churn
