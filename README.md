@@ -30,6 +30,7 @@ The world stores actual entity coordinates. Navigation is a separate graph used 
 npm run bench
 npm run bench:churn
 npm run bench:soak
+npm run bench:retention
 ```
 
 All benchmarks run with `--expose-gc`. This is intentional: the reports distinguish memory that is merely waiting for garbage collection from memory that remains reachable after forced full collections.
@@ -65,6 +66,10 @@ It reports:
 The benchmark asserts that both total entity count and target mover count remain constant after every maintenance phase. It measures simulation latency separately from churn-maintenance latency.
 
 Post-GC retention checkpoints are taken throughout the run. A steadily increasing post-GC line is evidence of retained state; a large pre-GC heap that collapses at the checkpoint is collectible garbage rather than a leak.
+
+### Retention benchmark
+
+`npm run bench:retention` runs the same 5,000-tick constant-load lifecycle workload without accumulating per-tick latency samples or automatic-GC event history. This keeps the benchmark harness itself from creating a growing retained-memory signal, so post-GC checkpoints are suitable for leak/retention analysis.
 
 ### Soak benchmark
 

@@ -47,3 +47,17 @@ jobs:
           CHURN_RETENTION_CHECK_EVERY: 10
           CHURN_MEMORY_SAMPLE_EVERY: 5
         run: npm run bench:churn
+
+      - name: Retention benchmark smoke
+        env:
+          CHURN_CITIES: 2
+          CHURN_GRID_SIZE: 6
+          CHURN_ENTITIES: 200
+          CHURN_MOVERS: 100
+          CHURN_TICKS: 10
+          CHURN_REROUTES_PER_TICK: 2
+          CHURN_STOP_STARTS_PER_TICK: 2
+          CHURN_MOVER_REPLACEMENTS_PER_TICK: 1
+          CHURN_IDLE_REPLACEMENTS_PER_TICK: 1
+          CHURN_RETENTION_CHECK_EVERY: 5
+        run: npm run bench:retention
