@@ -11,11 +11,12 @@ The world stores actual entity coordinates. Navigation is a separate graph used 
 - Movement advances numeric `x/y` state without temporary Vec2/object allocations in the hot loop and commits each entity position at most once per processed movement update.
 - Movement LOD supports full-detail nearby movers and coarse scheduled updates for distant movers.
 - Dynamic entity lookups use a spatial hash. Moving inside the same occupied cell range does not rewrite hash buckets.
+- Normal cell coordinates use packed numeric keys instead of transient string keys, and singleton cells store the entity ID directly instead of allocating a Set.
 - Reusable spatial query buffers are available through `createSpatialQueryBuffer()` and `queryRadiusInto()`.
 - `maxEntityRadius` shrinks when large entities are removed or resized.
 - Frozen mobility profiles are shared between entities instead of duplicated by `structuredClone()`.
 - Navigation nodes and roads use static spatial indexes for local `nodeAt`, `nearestNode` and `roadAt` queries.
-- Long road segments are indexed along traversed grid cells rather than filling their entire bounding box.
+- Long road segments are indexed along traversed centerline cells rather than filling their entire bounding box. Road width is applied at query time, avoiding broad padded road-index footprints.
 - Routing uses A* with a binary min-heap rather than an O(V^2) full scan.
 - Cached routes contain only road IDs and direction flags, not duplicated road geometry.
 - The route cache is bounded by both route count and total retained leg count.
