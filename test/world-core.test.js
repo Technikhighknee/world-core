@@ -155,11 +155,12 @@ test("movement commits position to the spatial index once per entity tick", () =
     });
 
     let commits = 0;
-    const originalSetPositionXY = world.setPositionXY.bind(world);
+    const originalSetEntityPositionXY =
+        world.setEntityPositionXY.bind(world);
 
-    world.setPositionXY = (...args) => {
+    world.setEntityPositionXY = (...args) => {
         commits++;
-        return originalSetPositionXY(...args);
+        return originalSetEntityPositionXY(...args);
     };
 
     startJourney(world, navigation, "walker", "b");
@@ -451,7 +452,10 @@ test("removing a moving entity clears movement scheduler state", () => {
 
     startJourney(world, navigation, "walker", "b");
 
+    const walker = world.getEntity("walker");
+
     assert.equal(world.movingEntities.has("walker"), true);
+    assert.strictEqual(world.movingEntities.get("walker"), walker);
     assert.equal(world.entityMovementIntervals.has("walker"), true);
 
     world.removeEntity("walker");
@@ -460,7 +464,7 @@ test("removing a moving entity clears movement scheduler state", () => {
     assert.equal(world.entityMovementIntervals.has("walker"), false);
 
     for (const bucket of world.movementBuckets.values()) {
-        assert.equal(bucket.has("walker"), false);
+        assert.equal(bucket.has(walker), false);
     }
 });
 
@@ -596,7 +600,12 @@ test("dynamic movement LOD schedules movers while default movement does not", ()
 
     assert.equal(lodWorld.movingEntities.size, 1);
     assert.equal(lodWorld.entityMovementIntervals.get("lod"), 10);
-    assert.equal(lodWorld.movementBuckets.get(10)?.has("lod"), true);
+    assert.equal(
+        lodWorld.movementBuckets
+            .get(10)
+            ?.has(lodWorld.getEntity("lod")),
+        true,
+    );
 });
 
 
