@@ -455,3 +455,43 @@ test("removing a moving entity clears movement scheduler state", () => {
         assert.equal(bucket.has("walker"), false);
     }
 });
+
+
+test("world diagnostics detect and report consistent index membership", () => {
+    const world = new World({ spatialCellSize: 10 });
+    const navigation = buildLineNavigation(100);
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    world.addEntity({
+        id: "idle",
+        position: { x: 20, y: 20 },
+    });
+
+    startJourney(world, navigation, "walker", "b");
+
+    const diagnostics = world.assertInternalConsistency();
+
+    assert.equal(diagnostics.entityCount, 2);
+    assert.equal(diagnostics.spatialIndexedEntities, 2);
+    assert.equal(diagnostics.movingEntities, 1);
+    assert.equal(diagnostics.movementIntervalEntries, 1);
+    assert.equal(diagnostics.movementBucketMemberships, 1);
+    assert.equal(diagnostics.radiusTrackedEntities, 2);
+
+    world.removeEntity("walker");
+    world.removeEntity("idle");
+
+    const empty = world.assertInternalConsistency();
+
+    assert.equal(empty.entityCount, 0);
+    assert.equal(empty.spatialIndexedEntities, 0);
+    assert.equal(empty.movingEntities, 0);
+    assert.equal(empty.movementIntervalEntries, 0);
+    assert.equal(empty.movementBucketMemberships, 0);
+    assert.equal(empty.radiusTrackedEntities, 0);
+});
