@@ -100,13 +100,13 @@ export function updateMovement(world, navigation, deltaSeconds) {
 
     world.forEachDueMovementBatch(
         deltaSeconds,
-        (entityIds, elapsedSeconds, skipEntityIds) => {
-            for (const entityId of entityIds) {
+        (entities, elapsedSeconds, skipEntityIds) => {
+            for (const entity of entities) {
+                const entityId = entity.id;
+
                 if (skipEntityIds?.has(entityId)) continue;
 
-                const entity = world.getEntity(entityId);
-
-                if (!entity || !entity.journey) {
+                if (!entity.journey) {
                     world.unmarkMoving(entityId);
                     continue;
                 }
@@ -304,6 +304,6 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
     }
 
     if (moved) {
-        world.setPositionXY(entity.id, x, y);
+        world.setEntityPositionXY(entity, x, y);
     }
 }
