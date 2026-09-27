@@ -1,173 +1,64 @@
-import {
-    performance,
-    PerformanceObserver,
-} from "node:perf_hooks";
+import { performance } from "node:perf_hooks";
 
 import { mobilityProfile } from "../src/world/mobility-profiles.js";
-import { Navigation } from "../src/world/navigation.js";
 import { startJourney } from "../src/world/movement.js";
 import { stepSimulation } from "../src/world/simulation.js";
 import { World } from "../src/world/world.js";
+import {
+    attachGcToTicks,
+    forceGc,
+    GcMonitor,
+    printDurationSummary,
+    printForcedGc,
+    printMemoryDelta,
+    printMemorySample,
+    printWorstTicks,
+    sampleMemory,
+    withoutForcedGc,
+} from "./support/metrics.js";
+import {
+    buildCityNavigation,
+    cityOriginX,
+    createRouteQueries,
+    nodeId,
+} from "./support/scenario.js";
 
 const cityCount = Number(process.env.BENCH_CITIES ?? 20);
 const gridSize = Number(process.env.BENCH_GRID_SIZE ?? 20);
-const nodeSpacing = 50;
+const nodeSpacing = Number(process.env.BENCH_NODE_SPACING ?? 50);
 const entitiesPerCity = Number(process.env.BENCH_ENTITIES_PER_CITY ?? 2500);
 const moversPerCity = Number(process.env.BENCH_MOVERS_PER_CITY ?? 750);
 const ticks = Number(process.env.BENCH_TICKS ?? 300);
-const citySpacing = 10000;
+const citySpacing = Number(process.env.BENCH_CITY_SPACING ?? 10000);
 const routeQueries = Number(process.env.BENCH_ROUTE_QUERIES ?? 2000);
 const memorySampleEvery = Number(process.env.BENCH_MEMORY_SAMPLE_EVERY ?? 10);
 
 const pedestrian = mobilityProfile("pedestrian");
-const world = new World({ spatialCellSize: 10 });
-const navigation = new Navigation({
-    spatialCellSize: 50,
+const forcedGcSamples = [];
+const gcMonitor = new GcMonitor();
+
+const startup = await forceGc("startup post-GC", forcedGcSamples);
+
+const {
+    navigation,
+    buildMs: graphBuildElapsed,
+} = buildCityNavigation({
+    cityCount,
+    gridSize,
+    nodeSpacing,
+    citySpacing,
     routeCacheSize: 20000,
     routeCacheMaxLegs: 256,
+    routeCacheMaxTotalLegs: 100000,
 });
 
-const gcDurations = [];
-const gcObserver = new PerformanceObserver(list => {
-    for (const entry of list.getEntries()) {
-        gcDurations.push(entry.duration);
-    }
+const afterGraph = await forceGc("graph post-GC", forcedGcSamples);
+
+const queries = createRouteQueries({
+    count: routeQueries,
+    cityCount,
+    gridSize,
 });
-
-gcObserver.observe({ entryTypes: ["gc"] });
-
-function percentile(values, p) {
-    if (values.length === 0) return 0;
-
-    const sorted = [...values].sort((a, b) => a - b);
-    const index = Math.min(
-        sorted.length - 1,
-        Math.max(0, Math.ceil(sorted.length * p) - 1),
-    );
-
-    return sorted[index];
-}
-
-function mb(bytes) {
-    return bytes / 1024 / 1024;
-}
-
-function nodeId(city, x, y) {
-    return `city-${city}-node-${x}-${y}`;
-}
-
-function addCityGraph(city) {
-    const originX = city * citySpacing;
-
-    for (let y = 0; y < gridSize; y++) {
-        for (let x = 0; x < gridSize; x++) {
-            navigation.addNode({
-                id: nodeId(city, x, y),
-                x: originX + x * nodeSpacing,
-                y: y * nodeSpacing,
-            });
-        }
-    }
-
-    for (let y = 0; y < gridSize; y++) {
-        for (let x = 0; x < gridSize; x++) {
-            if (x + 1 < gridSize) {
-                const from = nodeId(city, x, y);
-                const to = nodeId(city, x + 1, y);
-                const baseX = originX + x * nodeSpacing;
-                const baseY = y * nodeSpacing;
-
-                navigation.addRoad({
-                    id: `city-${city}-h-${x}-${y}`,
-                    from,
-                    to,
-                    width: 5,
-                    surface: (x + y) % 7 === 0 ? "mud" : "street",
-                    shape: [
-                        { x: baseX + 12.5, y: baseY + 1.5 },
-                        { x: baseX + 25, y: baseY - 1.5 },
-                        { x: baseX + 37.5, y: baseY + 1 },
-                    ],
-                });
-            }
-
-            if (y + 1 < gridSize) {
-                const from = nodeId(city, x, y);
-                const to = nodeId(city, x, y + 1);
-                const baseX = originX + x * nodeSpacing;
-                const baseY = y * nodeSpacing;
-
-                navigation.addRoad({
-                    id: `city-${city}-v-${x}-${y}`,
-                    from,
-                    to,
-                    width: 4,
-                    surface: (x * 3 + y) % 11 === 0 ? "mud" : "street",
-                    shape: [
-                        { x: baseX + 1.5, y: baseY + 12.5 },
-                        { x: baseX - 1, y: baseY + 25 },
-                        { x: baseX + 1, y: baseY + 37.5 },
-                    ],
-                });
-            }
-        }
-    }
-}
-
-function createRouteQueries(count) {
-    let state = 0x12345678;
-    const queries = [];
-    const seen = new Set();
-
-    function nextInt(max) {
-        state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-        return state % max;
-    }
-
-    while (queries.length < count) {
-        const city = nextInt(cityCount);
-        const sourceX = nextInt(gridSize);
-        const sourceY = nextInt(gridSize);
-        const destinationX = nextInt(gridSize);
-        const destinationY = nextInt(gridSize);
-
-        if (sourceX === destinationX && sourceY === destinationY) continue;
-
-        const key =
-            `${city}:${sourceX}:${sourceY}:${destinationX}:${destinationY}`;
-
-        if (seen.has(key)) continue;
-        seen.add(key);
-
-        queries.push({
-            from: nodeId(city, sourceX, sourceY),
-            to: nodeId(city, destinationX, destinationY),
-        });
-    }
-
-    return queries;
-}
-
-function sampleMemory(tick) {
-    const usage = process.memoryUsage();
-
-    return {
-        tick,
-        heapUsed: usage.heapUsed,
-        heapTotal: usage.heapTotal,
-        rss: usage.rss,
-        external: usage.external,
-    };
-}
-
-const buildStarted = performance.now();
-
-for (let city = 0; city < cityCount; city++) {
-    addCityGraph(city);
-}
-
-const graphBuildElapsed = performance.now() - buildStarted;
-const queries = createRouteQueries(routeQueries);
 
 navigation.invalidateAllRoutes();
 
@@ -185,9 +76,12 @@ for (const query of queries) {
 }
 
 const warmRoutingElapsed = performance.now() - warmRoutingStarted;
+const afterRoutes = await forceGc("routes post-GC", forcedGcSamples);
+
+const world = new World({ spatialCellSize: 10 });
 
 for (let city = 0; city < cityCount; city++) {
-    const originX = city * citySpacing;
+    const originX = cityOriginX(city, citySpacing);
 
     for (let i = 0; i < entitiesPerCity; i++) {
         const entityId = `city-${city}-person-${i}`;
@@ -216,18 +110,32 @@ for (let city = 0; city < cityCount; city++) {
     }
 }
 
-global.gc?.();
+const afterPopulation = await forceGc(
+    "population post-GC",
+    forcedGcSamples,
+);
 
-const memorySamples = [sampleMemory(0)];
-const tickTimes = [];
+const tickSamples = [];
+const memorySamples = [afterPopulation];
 
 for (let tick = 1; tick <= ticks; tick++) {
-    const started = performance.now();
+    const startTime = performance.now();
+
     stepSimulation(world, navigation, 1);
-    tickTimes.push(performance.now() - started);
+
+    const endTime = performance.now();
+
+    tickSamples.push({
+        tick,
+        startTime,
+        endTime,
+        duration: endTime - startTime,
+        movers: world.movingEntities.size,
+    });
 
     if (tick % memorySampleEvery === 0 || tick === ticks) {
-        memorySamples.push(sampleMemory(tick));
+        memorySamples.push(sampleMemory(`tick ${tick}`, tick));
+        await gcMonitor.flush();
     }
 }
 
@@ -246,43 +154,144 @@ for (let i = 0; i < 10000; i++) {
 
 const queryElapsed = performance.now() - queryStarted;
 
-await new Promise(resolve => setImmediate(resolve));
-gcObserver.disconnect();
+await gcMonitor.flush();
 
-const initialMemory = memorySamples[0];
-const finalMemory = memorySamples[memorySamples.length - 1];
-const peakHeap = Math.max(...memorySamples.map(sample => sample.heapUsed));
-const peakRss = Math.max(...memorySamples.map(sample => sample.rss));
-const cachedLegs = [...navigation.routeCache.values()]
-    .reduce((total, entry) => total + entry.route.legs.length, 0);
+const activeMoversAfterRun = world.movingEntities.size;
+const beforeFinalGc = sampleMemory("run end before GC", ticks);
+const afterFinalGc = await forceGc(
+    "run end post-GC",
+    forcedGcSamples,
+);
 
+await gcMonitor.flush();
+
+let activeJourneys = 0;
+
+for (const entity of world.entities.values()) {
+    if (entity.journey) activeJourneys++;
+}
+
+const cachedRoutesBeforeClear = navigation.routeCache.size;
+const cachedLegsBeforeClear = navigation.routeCacheLegCount;
+
+navigation.invalidateAllRoutes();
+
+const afterCacheClear = await forceGc(
+    "route cache cleared post-GC",
+    forcedGcSamples,
+);
+
+queryBuffer.results.length = 0;
+queryBuffer.candidates.clear();
+
+for (const entityId of world.entities.keys()) {
+    world.removeEntity(entityId);
+}
+
+const afterEntityClear = await forceGc(
+    "entities cleared post-GC",
+    forcedGcSamples,
+);
+
+await gcMonitor.flush();
+gcMonitor.stop();
+
+const automaticGcEvents = withoutForcedGc(
+    gcMonitor.events,
+    forcedGcSamples,
+);
+
+attachGcToTicks(tickSamples, automaticGcEvents);
+
+const tickDurations = tickSamples.map(sample => sample.duration);
+const automaticGcDurations = automaticGcEvents.map(event => event.duration);
+
+const peakHeap = Math.max(
+    ...memorySamples.map(sample => sample.heapUsed),
+    beforeFinalGc.heapUsed,
+);
+const peakRss = Math.max(
+    ...memorySamples.map(sample => sample.rss),
+    beforeFinalGc.rss,
+);
+
+console.log("=== workload ===");
 console.log(`cities: ${cityCount}`);
 console.log(`nodes: ${navigation.nodes.size.toLocaleString()}`);
 console.log(`roads: ${navigation.roads.size.toLocaleString()}`);
-console.log(`road index memberships: ${navigation.roadIndex.membershipCount().toLocaleString()}`);
-console.log(`entities: ${world.entities.size.toLocaleString()}`);
-console.log(`active movers at start: ${(cityCount * moversPerCity).toLocaleString()}`);
-console.log(`active movers after run: ${world.movingEntities.size.toLocaleString()}`);
+console.log(
+    `road index memberships: ${navigation.roadIndex.membershipCount().toLocaleString()}`,
+);
+console.log(
+    `entities at run start: ${(cityCount * entitiesPerCity).toLocaleString()}`,
+);
+console.log(
+    `active movers at run start: ${(cityCount * moversPerCity).toLocaleString()}`,
+);
+console.log(`active movers after run: ${activeMoversAfterRun.toLocaleString()}`);
+console.log(`active journeys after run: ${activeJourneys.toLocaleString()}`);
 console.log(`graph build: ${graphBuildElapsed.toFixed(2)} ms`);
-console.log(`unique cold route queries (${queries.length}): ${coldRoutingElapsed.toFixed(2)} ms`);
-console.log(`same warm route queries (${queries.length}): ${warmRoutingElapsed.toFixed(2)} ms`);
-console.log(`cached routes: ${navigation.routeCache.size.toLocaleString()}`);
-console.log(`cached route legs: ${cachedLegs.toLocaleString()}`);
-console.log(`movement ticks: ${ticks}`);
-console.log(`tick p50: ${percentile(tickTimes, 0.50).toFixed(3)} ms`);
-console.log(`tick p95: ${percentile(tickTimes, 0.95).toFixed(3)} ms`);
-console.log(`tick p99: ${percentile(tickTimes, 0.99).toFixed(3)} ms`);
-console.log(`tick max: ${Math.max(...tickTimes).toFixed(3)} ms`);
-console.log(`heap start: ${mb(initialMemory.heapUsed).toFixed(2)} MiB`);
-console.log(`heap end: ${mb(finalMemory.heapUsed).toFixed(2)} MiB`);
-console.log(`heap peak: ${mb(peakHeap).toFixed(2)} MiB`);
-console.log(`heap delta: ${mb(finalMemory.heapUsed - initialMemory.heapUsed).toFixed(2)} MiB`);
-console.log(`rss start: ${mb(initialMemory.rss).toFixed(2)} MiB`);
-console.log(`rss end: ${mb(finalMemory.rss).toFixed(2)} MiB`);
-console.log(`rss peak: ${mb(peakRss).toFixed(2)} MiB`);
-console.log(`GC events: ${gcDurations.length}`);
-console.log(`GC total: ${gcDurations.reduce((sum, value) => sum + value, 0).toFixed(2)} ms`);
-console.log(`GC p95: ${percentile(gcDurations, 0.95).toFixed(3)} ms`);
-console.log(`GC max: ${(gcDurations.length ? Math.max(...gcDurations) : 0).toFixed(3)} ms`);
-console.log(`10,000 buffered nearby queries: ${queryElapsed.toFixed(2)} ms`);
+console.log(
+    `unique cold route queries (${queries.length}): ${coldRoutingElapsed.toFixed(2)} ms`,
+);
+console.log(
+    `same warm route queries (${queries.length}): ${warmRoutingElapsed.toFixed(2)} ms`,
+);
+console.log(
+    `cached routes before clear: ${cachedRoutesBeforeClear.toLocaleString()}`,
+);
+console.log(
+    `cached route legs before clear: ${cachedLegsBeforeClear.toLocaleString()}`,
+);
+
+console.log("\n=== tick latency ===");
+printDurationSummary("tick", tickDurations);
+printWorstTicks(tickSamples, 10);
+
+console.log("\n=== memory phases ===");
+printMemorySample(startup);
+printMemorySample(afterGraph);
+printMemorySample(afterRoutes);
+printMemorySample(afterPopulation);
+printMemorySample(beforeFinalGc);
+printMemorySample(afterFinalGc);
+printMemorySample(afterCacheClear);
+printMemorySample(afterEntityClear);
+console.log(`sampled heap peak: ${(peakHeap / 1024 / 1024).toFixed(2)} MiB`);
+console.log(`sampled RSS peak: ${(peakRss / 1024 / 1024).toFixed(2)} MiB`);
+printMemoryDelta("graph retained", startup, afterGraph);
+printMemoryDelta("route-cache retained", afterGraph, afterRoutes);
+printMemoryDelta("population retained", afterRoutes, afterPopulation);
+printMemoryDelta(
+    "uncollected run garbage",
+    afterFinalGc,
+    beforeFinalGc,
+);
+printMemoryDelta(
+    "post-run retained drift vs pre-run",
+    afterPopulation,
+    afterFinalGc,
+);
+printMemoryDelta(
+    "cache contribution after run",
+    afterCacheClear,
+    afterFinalGc,
+);
+printMemoryDelta(
+    "entity/world contribution after cache clear",
+    afterEntityClear,
+    afterCacheClear,
+);
+
+console.log("\n=== GC ===");
+console.log(
+    `observed automatic GC events: ${automaticGcEvents.length.toLocaleString()}`,
+);
+printDurationSummary("automatic GC", automaticGcDurations);
+printForcedGc(forcedGcSamples);
+
+console.log("\n=== spatial query ===");
+console.log(
+    `10,000 buffered nearby queries: ${queryElapsed.toFixed(2)} ms`,
+);
 console.log(`query checksum: ${nearbyCount}`);

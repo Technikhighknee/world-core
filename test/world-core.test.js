@@ -367,3 +367,91 @@ test("nearby queries ignore thousands of far-away entities", () => {
 
     assert.deepEqual(nearby.map(entity => entity.id), ["target"]);
 });
+
+
+test("frozen mobility profiles are shared instead of cloned per entity", () => {
+    const world = new World();
+    const pedestrian = mobilityProfile("pedestrian");
+
+    world.addEntity({
+        id: "a",
+        position: { x: 0, y: 0 },
+        mobility: pedestrian,
+    });
+
+    world.addEntity({
+        id: "b",
+        position: { x: 1, y: 0 },
+        mobility: pedestrian,
+    });
+
+    assert.strictEqual(world.getEntity("a").mobility, pedestrian);
+    assert.strictEqual(world.getEntity("b").mobility, pedestrian);
+    assert.strictEqual(
+        world.getEntity("a").mobility,
+        world.getEntity("b").mobility,
+    );
+});
+
+test("route cache is bounded by total retained legs", () => {
+    const navigation = new Navigation({
+        routeCacheSize: 100,
+        routeCacheMaxLegs: 100,
+        routeCacheMaxTotalLegs: 3,
+    });
+
+    for (let i = 0; i < 5; i++) {
+        navigation.addNode({ id: `n${i}`, x: i * 10, y: 0 });
+
+        if (i > 0) {
+            navigation.addRoad({
+                id: `r${i - 1}`,
+                from: `n${i - 1}`,
+                to: `n${i}`,
+            });
+        }
+    }
+
+    const mobility = { profileId: "test", speed: 1 };
+
+    navigation.findRoute("n0", "n2", mobility);
+    navigation.findRoute("n1", "n4", mobility);
+
+    assert.ok(navigation.routeCacheLegCount <= 3);
+    assert.ok(navigation.routeCache.size <= 1);
+
+    navigation.invalidateAllRoutes();
+
+    assert.equal(navigation.routeCache.size, 0);
+    assert.equal(navigation.routeCacheLegCount, 0);
+});
+
+test("removing a moving entity clears movement scheduler state", () => {
+    const world = new World({
+        movementLodTiers: [
+            { maxDistance: Infinity, interval: 10 },
+        ],
+        interestPoints: [{ x: 0, y: 0 }],
+    });
+    const navigation = buildLineNavigation(100);
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(world, navigation, "walker", "b");
+
+    assert.equal(world.movingEntities.has("walker"), true);
+    assert.equal(world.entityMovementIntervals.has("walker"), true);
+
+    world.removeEntity("walker");
+
+    assert.equal(world.movingEntities.has("walker"), false);
+    assert.equal(world.entityMovementIntervals.has("walker"), false);
+
+    for (const bucket of world.movementBuckets.values()) {
+        assert.equal(bucket.has("walker"), false);
+    }
+});

@@ -18,6 +18,7 @@ export class World {
         this.movementBuckets = new Map();
         this.movementAccumulators = new Map();
         this.entityMovementIntervals = new Map();
+        this.movementReclassifyScratch = [];
 
         this.movementLodTiers = null;
         this.interestPoints = [];
@@ -122,7 +123,16 @@ export class World {
             throw new Error(`Entity ${entity.id} has no position`);
         }
 
-        const stored = structuredClone(entity);
+        let stored;
+
+        if (entity.mobility && Object.isFrozen(entity.mobility)) {
+            const { mobility, ...cloneable } = entity;
+            stored = structuredClone(cloneable);
+            stored.mobility = mobility;
+        } else {
+            stored = structuredClone(entity);
+        }
+
         stored.body ??= { radius: 0.35 };
 
         const radius = stored.body.radius ?? 0;

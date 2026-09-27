@@ -83,7 +83,8 @@ export function stopJourney(entity, world = null) {
 }
 
 export function updateMovement(world, navigation, deltaSeconds) {
-    const reclassify = [];
+    const reclassify = world.movementReclassifyScratch;
+    reclassify.length = 0;
 
     world.forEachDueMovementBatch(
         deltaSeconds,
@@ -105,54 +106,16 @@ export function updateMovement(world, navigation, deltaSeconds) {
         },
     );
 
-    for (const entityId of reclassify) {
-        world.refreshEntityMovementLod(entityId);
+    for (let i = 0; i < reclassify.length; i++) {
+        world.refreshEntityMovementLod(reclassify[i]);
     }
+
+    reclassify.length = 0;
 }
 
 function finishJourney(world, entity) {
     entity.journey = null;
     world.unmarkMoving(entity.id);
-}
-
-function moveToward(x, y, targetX, targetY, speed, remainingTime) {
-    const dx = targetX - x;
-    const dy = targetY - y;
-    const distanceSquared = dx * dx + dy * dy;
-
-    if (distanceSquared <= EPSILON_SQUARED) {
-        return {
-            x: targetX,
-            y: targetY,
-            remainingTime,
-            reached: true,
-            moved: false,
-        };
-    }
-
-    const distanceToTarget = Math.sqrt(distanceSquared);
-    const secondsToTarget = distanceToTarget / speed;
-
-    if (secondsToTarget <= remainingTime) {
-        return {
-            x: targetX,
-            y: targetY,
-            remainingTime: remainingTime - secondsToTarget,
-            reached: true,
-            moved: true,
-        };
-    }
-
-    const travelled = speed * remainingTime;
-    const scale = travelled / distanceToTarget;
-
-    return {
-        x: x + dx * scale,
-        y: y + dy * scale,
-        remainingTime: 0,
-        reached: false,
-        moved: true,
-    };
 }
 
 function moveEntity(world, navigation, entity, deltaSeconds) {
@@ -165,27 +128,40 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
         const journey = entity.journey;
 
         if (journey.entryPoint) {
-            const result = moveToward(
-                x,
-                y,
-                journey.entryPoint.x,
-                journey.entryPoint.y,
-                entity.mobility.speed,
-                remainingTime,
-            );
+            const targetX = journey.entryPoint.x;
+            const targetY = journey.entryPoint.y;
+            const dx = targetX - x;
+            const dy = targetY - y;
+            const distanceSquared = dx * dx + dy * dy;
 
-            x = result.x;
-            y = result.y;
-            remainingTime = result.remainingTime;
-            moved ||= result.moved;
-
-            if (result.reached) {
+            if (distanceSquared <= EPSILON_SQUARED) {
+                x = targetX;
+                y = targetY;
                 journey.entryPoint = null;
-            } else {
-                break;
+                continue;
             }
 
-            continue;
+            const distanceToTarget = Math.sqrt(distanceSquared);
+            const secondsToTarget =
+                distanceToTarget / entity.mobility.speed;
+
+            if (secondsToTarget <= remainingTime) {
+                x = targetX;
+                y = targetY;
+                remainingTime -= secondsToTarget;
+                moved = true;
+                journey.entryPoint = null;
+                continue;
+            }
+
+            const scale =
+                entity.mobility.speed * remainingTime / distanceToTarget;
+
+            x += dx * scale;
+            y += dy * scale;
+            moved = true;
+            remainingTime = 0;
+            break;
         }
 
         const leg = journey.route.legs[journey.legIndex];
@@ -236,21 +212,13 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             break;
         }
 
-        const result = moveToward(
-            x,
-            y,
-            target.x,
-            target.y,
-            speed,
-            remainingTime,
-        );
+        const dx = target.x - x;
+        const dy = target.y - y;
+        const distanceSquared = dx * dx + dy * dy;
 
-        x = result.x;
-        y = result.y;
-        remainingTime = result.remainingTime;
-        moved ||= result.moved;
-
-        if (result.reached) {
+        if (distanceSquared <= EPSILON_SQUARED) {
+            x = target.x;
+            y = target.y;
             journey.pointIndex = nextPointIndex(
                 journey.pointIndex,
                 leg.reversed,
@@ -258,7 +226,27 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             continue;
         }
 
-        break;
+        const distanceToTarget = Math.sqrt(distanceSquared);
+        const secondsToTarget = distanceToTarget / speed;
+
+        if (secondsToTarget <= remainingTime) {
+            x = target.x;
+            y = target.y;
+            remainingTime -= secondsToTarget;
+            moved = true;
+            journey.pointIndex = nextPointIndex(
+                journey.pointIndex,
+                leg.reversed,
+            );
+            continue;
+        }
+
+        const scale = speed * remainingTime / distanceToTarget;
+
+        x += dx * scale;
+        y += dy * scale;
+        moved = true;
+        remainingTime = 0;
     }
 
     if (moved) {
