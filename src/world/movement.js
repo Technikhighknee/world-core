@@ -118,44 +118,6 @@ function finishJourney(world, entity) {
     world.unmarkMoving(entity.id);
 }
 
-function advanceToward(
-    x,
-    y,
-    targetX,
-    targetY,
-    speed,
-    remainingTime,
-) {
-    const dx = targetX - x;
-    const dy = targetY - y;
-    const distanceSquared = dx * dx + dy * dy;
-
-    if (distanceSquared <= EPSILON_SQUARED) {
-        return null;
-    }
-
-    const distanceToTarget = Math.sqrt(distanceSquared);
-    const secondsToTarget = distanceToTarget / speed;
-
-    if (secondsToTarget <= remainingTime) {
-        return [
-            targetX,
-            targetY,
-            remainingTime - secondsToTarget,
-            true,
-        ];
-    }
-
-    const scale = speed * remainingTime / distanceToTarget;
-
-    return [
-        x + dx * scale,
-        y + dy * scale,
-        0,
-        false,
-    ];
-}
-
 function moveEntity(world, navigation, entity, deltaSeconds) {
     let remainingTime = deltaSeconds;
     let x = entity.position.x;
