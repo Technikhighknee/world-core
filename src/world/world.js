@@ -66,15 +66,12 @@ export class World {
         const explicit = entity.simulation?.movementInterval;
 
         if (explicit != null) {
-            return Math.max(0, explicit);
+            const interval = Math.max(0, explicit);
+            return interval === 0 ? null : interval;
         }
 
-        if (
-            !this.movementLodTiers ||
-            this.movementLodTiers.length === 0 ||
-            this.interestPoints.length === 0
-        ) {
-            return 0;
+        if (!this.hasDynamicMovementLod()) {
+            return null;
         }
 
         let nearestSquared = Infinity;
@@ -100,6 +97,11 @@ export class World {
 
         if (current != null) {
             this.movementBuckets.get(current)?.delete(entityId);
+            this.entityMovementIntervals.delete(entityId);
+        }
+
+        if (interval == null) {
+            return;
         }
 
         let bucket = this.movementBuckets.get(interval);
@@ -312,6 +314,13 @@ export class World {
         );
     }
 
+    hasDynamicMovementLod() {
+        return Boolean(
+            this.movementLodTiers?.length &&
+            this.interestPoints.length > 0
+        );
+    }
+
     refreshAllMovementLod() {
         for (const entityId of this.movingEntities) {
             this.refreshEntityMovementLod(entityId);
@@ -319,11 +328,23 @@ export class World {
     }
 
     forEachDueMovementBatch(deltaSeconds, callback) {
+        const scheduledCount = this.entityMovementIntervals.size;
+
+        if (scheduledCount < this.movingEntities.size) {
+            callback(
+                this.movingEntities,
+                deltaSeconds,
+                scheduledCount > 0
+                    ? this.entityMovementIntervals
+                    : null,
+            );
+        }
+
         for (const [interval, entityIds] of this.movementBuckets) {
             if (entityIds.size === 0) continue;
 
             if (interval === 0) {
-                callback(entityIds, deltaSeconds);
+                callback(entityIds, deltaSeconds, null);
                 continue;
             }
 
@@ -343,7 +364,7 @@ export class World {
                 accumulated - elapsedSeconds,
             );
 
-            callback(entityIds, elapsedSeconds);
+            callback(entityIds, elapsedSeconds, null);
         }
     }
 
@@ -448,20 +469,20 @@ export class World {
         }
 
         if (
-            diagnostics.movementIntervalEntries !==
-            diagnostics.movingEntities
+            diagnostics.movementBucketMemberships !==
+            diagnostics.movementIntervalEntries
         ) {
             throw new Error(
-                `Movement interval drift: ${diagnostics.movementIntervalEntries} interval entries for ${diagnostics.movingEntities} movers`,
+                `Movement scheduling drift: ${diagnostics.movementBucketMemberships} bucket memberships for ${diagnostics.movementIntervalEntries} scheduled movers`,
             );
         }
 
         if (
-            diagnostics.movementBucketMemberships !==
+            diagnostics.movementIntervalEntries >
             diagnostics.movingEntities
         ) {
             throw new Error(
-                `Movement bucket drift: ${diagnostics.movementBucketMemberships} bucket memberships for ${diagnostics.movingEntities} movers`,
+                `Movement scheduling overflow: ${diagnostics.movementIntervalEntries} scheduled movers for ${diagnostics.movingEntities} active movers`,
             );
         }
 
@@ -471,10 +492,12 @@ export class World {
                     `Moving entity missing from registry: ${entityId}`,
                 );
             }
+        }
 
-            if (!this.entityMovementIntervals.has(entityId)) {
+        for (const entityId of this.entityMovementIntervals.keys()) {
+            if (!this.movingEntities.has(entityId)) {
                 throw new Error(
-                    `Moving entity missing interval: ${entityId}`,
+                    `Scheduled entity is not moving: ${entityId}`,
                 );
             }
         }
