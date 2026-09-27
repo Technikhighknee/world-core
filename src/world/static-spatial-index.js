@@ -209,10 +209,15 @@ export class StaticSpatialIndex {
 
         for (let y = startY; y <= endY; y++) {
             for (let x = startX; x <= endX; x++) {
-                forEachMembership(
-                    this.cells.get(cellKey(x, y)),
-                    id => result.add(id),
-                );
+                const cell = this.cells.get(cellKey(x, y));
+                if (cell === undefined) continue;
+
+                if (cell instanceof Set) {
+                    for (const id of cell) result.add(id);
+                    continue;
+                }
+
+                result.add(cell);
             }
         }
 
