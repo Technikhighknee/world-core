@@ -397,4 +397,88 @@ export class World {
             options,
         );
     }
+
+    getDiagnostics() {
+        let movementBucketMemberships = 0;
+
+        for (const bucket of this.movementBuckets.values()) {
+            movementBucketMemberships += bucket.size;
+        }
+
+        let radiusTrackedEntities = 0;
+
+        for (const count of this.radiusCounts.values()) {
+            radiusTrackedEntities += count;
+        }
+
+        return {
+            entityCount: this.entities.size,
+            spatialIndexedEntities: this.spatial.entityRanges.size,
+            spatialCellCount: this.spatial.cells.size,
+            spatialMemberships: this.spatial.membershipCount(),
+            movingEntities: this.movingEntities.size,
+            movementIntervalEntries: this.entityMovementIntervals.size,
+            movementBucketCount: this.movementBuckets.size,
+            movementBucketMemberships,
+            radiusTrackedEntities,
+            radiusCountEntries: this.radiusCounts.size,
+            maxEntityRadius: this.maxEntityRadius,
+        };
+    }
+
+    assertInternalConsistency() {
+        const diagnostics = this.getDiagnostics();
+
+        if (
+            diagnostics.spatialIndexedEntities !==
+            diagnostics.entityCount
+        ) {
+            throw new Error(
+                `Spatial index drift: ${diagnostics.spatialIndexedEntities} indexed for ${diagnostics.entityCount} entities`,
+            );
+        }
+
+        if (
+            diagnostics.radiusTrackedEntities !==
+            diagnostics.entityCount
+        ) {
+            throw new Error(
+                `Radius tracking drift: ${diagnostics.radiusTrackedEntities} tracked for ${diagnostics.entityCount} entities`,
+            );
+        }
+
+        if (
+            diagnostics.movementIntervalEntries !==
+            diagnostics.movingEntities
+        ) {
+            throw new Error(
+                `Movement interval drift: ${diagnostics.movementIntervalEntries} interval entries for ${diagnostics.movingEntities} movers`,
+            );
+        }
+
+        if (
+            diagnostics.movementBucketMemberships !==
+            diagnostics.movingEntities
+        ) {
+            throw new Error(
+                `Movement bucket drift: ${diagnostics.movementBucketMemberships} bucket memberships for ${diagnostics.movingEntities} movers`,
+            );
+        }
+
+        for (const entityId of this.movingEntities) {
+            if (!this.entities.has(entityId)) {
+                throw new Error(
+                    `Moving entity missing from registry: ${entityId}`,
+                );
+            }
+
+            if (!this.entityMovementIntervals.has(entityId)) {
+                throw new Error(
+                    `Moving entity missing interval: ${entityId}`,
+                );
+            }
+        }
+
+        return diagnostics;
+    }
 }
