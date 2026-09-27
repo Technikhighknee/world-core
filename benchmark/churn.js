@@ -499,6 +499,7 @@ for (const snapshot of diagnosticSnapshots) {
         `${snapshot.label}: entities=${snapshot.entityCount.toLocaleString()} ` +
         `spatialIndexed=${snapshot.spatialIndexedEntities.toLocaleString()} ` +
         `spatialCells=${snapshot.spatialCellCount.toLocaleString()} ` +
+        `multiCells=${snapshot.spatialMultiOccupancyCells.toLocaleString()} ` +
         `spatialMemberships=${snapshot.spatialMemberships.toLocaleString()} ` +
         `movers=${snapshot.movingEntities.toLocaleString()} ` +
         `intervals=${snapshot.movementIntervalEntries.toLocaleString()} ` +
