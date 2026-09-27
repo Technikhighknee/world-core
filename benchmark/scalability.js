@@ -156,6 +156,7 @@ const queryElapsed = performance.now() - queryStarted;
 
 await gcMonitor.flush();
 
+const activeMoversAfterRun = world.movingEntities.size;
 const beforeFinalGc = sampleMemory("run end before GC", ticks);
 const afterFinalGc = await forceGc(
     "run end post-GC",
@@ -227,7 +228,7 @@ console.log(
 console.log(
     `active movers at run start: ${(cityCount * moversPerCity).toLocaleString()}`,
 );
-console.log(`active movers after run: ${world.movingEntities.size.toLocaleString()}`);
+console.log(`active movers after run: ${activeMoversAfterRun.toLocaleString()}`);
 console.log(`active journeys after run: ${activeJourneys.toLocaleString()}`);
 console.log(`graph build: ${graphBuildElapsed.toFixed(2)} ms`);
 console.log(
