@@ -84,11 +84,12 @@ export async function forceGc(label, samples = [], passes = 2) {
 
     for (let pass = 0; pass < passes; pass++) {
         const before = process.memoryUsage().heapUsed;
-        const started = performance.now();
+        const startTime = performance.now();
 
         global.gc();
 
-        const duration = performance.now() - started;
+        const endTime = performance.now();
+        const duration = endTime - startTime;
         await new Promise(resolve => setImmediate(resolve));
 
         const after = process.memoryUsage().heapUsed;
@@ -96,6 +97,8 @@ export async function forceGc(label, samples = [], passes = 2) {
         samples.push({
             label,
             pass: pass + 1,
+            startTime,
+            endTime,
             duration,
             heapBefore: before,
             heapAfter: after,
@@ -189,4 +192,13 @@ export function printWorstTicks(ticks, count = 10) {
             `movers=${tick.movers.toLocaleString()}`,
         );
     }
+}
+
+export function withoutForcedGc(events, forcedGcSamples) {
+    return events.filter(event =>
+        !forcedGcSamples.some(sample =>
+            event.startTime >= sample.startTime - 1 &&
+            event.startTime <= sample.endTime + 1
+        )
+    );
 }
