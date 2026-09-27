@@ -375,7 +375,7 @@ for (let tick = 1; tick <= ticks; tick++) {
         (tick % memorySampleEvery === 0 || tick === ticks)
     ) {
         memorySamples.push(sampleMemory(`tick ${tick}`, tick));
-        if (gcMonitor) if (gcMonitor) await gcMonitor.flush();
+        if (gcMonitor) await gcMonitor.flush();
     }
 
     if (
@@ -395,7 +395,7 @@ for (let tick = 1; tick <= ticks; tick++) {
             ...world.assertInternalConsistency(),
         });
 
-        if (gcMonitor) if (gcMonitor) await gcMonitor.flush();
+        if (gcMonitor) await gcMonitor.flush();
     }
 }
 
