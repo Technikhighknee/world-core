@@ -12,6 +12,7 @@ on:
           - standard
           - churn
           - soak
+          - profile
 
 jobs:
   benchmark:
@@ -35,6 +36,9 @@ jobs:
               ;;
             soak)
               npm run bench:soak 2>&1 | tee benchmark-output.txt
+              ;;
+            profile)
+              npm run bench:profile 2>&1 | tee benchmark-output.txt
               ;;
           esac
       - uses: actions/upload-artifact@v4
