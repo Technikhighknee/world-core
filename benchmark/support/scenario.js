@@ -1,3 +1,5 @@
+import { performance } from "node:perf_hooks";
+
 import { Navigation } from "../../src/world/navigation.js";
 
 export function nodeId(city, x, y) {
