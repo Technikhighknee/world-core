@@ -501,6 +501,55 @@ function advanceLeg(world, navigation, entity, journey) {
     return true;
 }
 
+function hasNextLeg(journey) {
+    if (journey.prefixLeg) {
+        return Boolean(
+            journey.route.legs[
+                journey.legIndex
+            ],
+        );
+    }
+
+    return Boolean(
+        journey.route.legs[
+            journey.legIndex + 1
+        ],
+    );
+}
+
+function junctionRadiusForCurrentTarget(
+    navigation,
+    journey,
+    road,
+    leg,
+) {
+    if (!hasNextLeg(journey)) {
+        return 0;
+    }
+
+    const endpointIndex =
+        leg.reversed
+            ? 0
+            : road.points.length - 1;
+
+    if (
+        journey.pointIndex !==
+        endpointIndex
+    ) {
+        return 0;
+    }
+
+    const nodeId =
+        leg.reversed
+            ? road.from
+            : road.to;
+
+    return (
+        navigation.nodes.get(nodeId)
+            ?.junctionRadius ?? 0
+    );
+}
+
 function moveEntity(world, navigation, entity, deltaSeconds) {
     let remainingTime = deltaSeconds;
     let x = entity.position.x;
@@ -657,6 +706,33 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
         }
 
         const distanceToTarget = Math.sqrt(distanceSquared);
+        const junctionRadius =
+            junctionRadiusForCurrentTarget(
+                navigation,
+                journey,
+                road,
+                leg,
+            );
+
+        if (
+            junctionRadius > 0 &&
+            distanceToTarget <=
+                junctionRadius
+        ) {
+            if (
+                !advanceLeg(
+                    world,
+                    navigation,
+                    entity,
+                    journey,
+                )
+            ) {
+                break;
+            }
+
+            continue;
+        }
+
         const secondsToTarget = distanceToTarget / speed;
 
         if (secondsToTarget <= remainingTime) {
