@@ -267,3 +267,21 @@ test("snapshot validation rejects malformed LOD and accumulators", () => {
         /expected number >= 0/,
     );
 });
+
+
+test("snapshot validation rejects disconnected route legs and incomplete moving order", () => {
+    expectInvalid(
+        snapshot => {
+            snapshot.routes[0].legs[0].reversed =
+                true;
+        },
+        /route leg is not connected|one-way road in reverse/,
+    );
+
+    expectInvalid(
+        snapshot => {
+            snapshot.movingOrder = [];
+        },
+        /must contain every entity with an active journey exactly once/,
+    );
+});
