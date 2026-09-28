@@ -2043,3 +2043,129 @@ test("package self-reference exposes only the intended public API", async () => 
     assert.equal("StaticSpatialIndex" in api, false);
     assert.equal("MinPriorityQueue" in api, false);
 });
+
+
+test("navigation consistency diagnostics survive dynamic graph mutations and cached routes", () => {
+    const navigation = new Navigation({
+        spatialCellSize: 10,
+        routeCacheSize: 100,
+        routeCacheMaxTotalLegs: 1000,
+    });
+    const mobility = {
+        profileId: "walker",
+        speed: 1,
+    };
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 10, y: 0 });
+    navigation.addNode({ id: "c", x: 20, y: 0 });
+    navigation.addNode({ id: "d", x: 10, y: 10 });
+
+    navigation.addRoad({
+        id: "ab",
+        from: "a",
+        to: "b",
+    });
+    navigation.addRoad({
+        id: "bc",
+        from: "b",
+        to: "c",
+    });
+    navigation.addRoad({
+        id: "bd",
+        from: "b",
+        to: "d",
+        bidirectional: false,
+    });
+
+    navigation.findRoute("a", "c", mobility);
+    navigation.findRoute("c", "a", mobility);
+
+    let diagnostics =
+        navigation.assertInternalConsistency();
+
+    assert.equal(diagnostics.nodeCount, 4);
+    assert.equal(diagnostics.roadCount, 3);
+    assert.equal(diagnostics.adjacencyEdgeCount, 5);
+    assert.equal(diagnostics.componentCount, 1);
+
+    navigation.setRoadEnabled("bc", false);
+    navigation.setRoadWidth("ab", 6);
+    navigation.setRoadSurface("ab", "mud");
+    navigation.replaceRoadGeometry("ab", [
+        { x: 5, y: 2 },
+    ]);
+    navigation.setRoadBidirectional("bd", true);
+
+    diagnostics =
+        navigation.assertInternalConsistency();
+
+    assert.equal(diagnostics.nodeCount, 4);
+    assert.equal(diagnostics.roadCount, 3);
+    assert.equal(diagnostics.adjacencyEdgeCount, 6);
+
+    navigation.removeRoad("bc");
+    navigation.removeNode("d");
+
+    diagnostics =
+        navigation.assertInternalConsistency();
+
+    assert.equal(diagnostics.nodeCount, 3);
+    assert.equal(diagnostics.roadCount, 1);
+    assert.equal(diagnostics.componentCount, 2);
+});
+
+test("navigation consistency diagnostics detect adjacency corruption", () => {
+    const navigation = buildLineNavigation(100);
+
+    navigation.adjacency.get("a").push({
+        roadId: "road",
+        to: "b",
+        reversed: false,
+    });
+
+    assert.throws(
+        () =>
+            navigation.assertInternalConsistency(),
+        /Adjacency edge count drift|Duplicate adjacency edge/,
+    );
+});
+
+test("navigation consistency diagnostics detect stale spatial index entries", () => {
+    const navigation = buildLineNavigation(100);
+
+    navigation.roadIndex.itemCells.set(
+        "ghost-road",
+        123,
+    );
+
+    assert.throws(
+        () =>
+            navigation.assertInternalConsistency(),
+        /Road index drift|stale road/,
+    );
+});
+
+test("navigation consistency diagnostics detect stale route cache versions", () => {
+    const navigation = buildLineNavigation(100);
+    const mobility = {
+        profileId: "walker",
+        speed: 1,
+    };
+
+    const route =
+        navigation.findRoute(
+            "a",
+            "b",
+            mobility,
+        );
+
+    assert.ok(route);
+    navigation.roads.get("road").version++;
+
+    assert.throws(
+        () =>
+            navigation.assertInternalConsistency(),
+        /stale road version/,
+    );
+});
