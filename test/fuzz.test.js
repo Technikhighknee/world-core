@@ -596,15 +596,18 @@ test("randomized world movement lifecycle serialization and spatial queries pres
                 const y =
                     random.int(60);
 
+                const obstacleType =
+                    random.int(2) ===
+                    0
+                        ? "circle"
+                        : "aabb";
+
                 world.addObstacle({
                     id,
                     type:
-                        random.int(2) ===
-                        0
-                            ? "circle"
-                            : "aabb",
-                    ...(random.int(2) ===
-                    0
+                        obstacleType,
+                    ...(obstacleType ===
+                    "circle"
                         ? {
                             center: {
                                 x,
