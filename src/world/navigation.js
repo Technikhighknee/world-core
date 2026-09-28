@@ -226,39 +226,72 @@ export class Navigation {
         this.componentMembers.clear();
         this.nextComponentId = 1;
 
+        const neighbors = new Map();
+
+        for (const nodeId of this.nodes.keys()) {
+            neighbors.set(nodeId, []);
+        }
+
+        for (const road of this.roads.values()) {
+            if (!road.enabled) continue;
+
+            neighbors.get(road.from)?.push(road.to);
+            neighbors.get(road.to)?.push(road.from);
+        }
+
+        for (const list of neighbors.values()) {
+            list.sort();
+        }
+
         const unvisited = new Set(
             [...this.nodes.keys()].sort(),
         );
 
         while (unvisited.size > 0) {
-            const startId = unvisited.values().next().value;
-            const componentId = this.nextComponentId++;
+            const startId =
+                unvisited.values().next().value;
+            const componentId =
+                this.nextComponentId++;
             const members = new Set();
             const queue = [startId];
 
             unvisited.delete(startId);
 
-            for (let index = 0; index < queue.length; index++) {
+            for (
+                let index = 0;
+                index < queue.length;
+                index++
+            ) {
                 const nodeId = queue[index];
-                const node = this.nodes.get(nodeId);
+                const node =
+                    this.nodes.get(nodeId);
 
                 if (!node) continue;
 
                 node.componentId = componentId;
                 members.add(nodeId);
 
-                for (const edge of this.adjacency.get(nodeId) ?? []) {
-                    const road = this.roads.get(edge.roadId);
+                for (
+                    const neighborId of
+                    neighbors.get(nodeId) ?? []
+                ) {
+                    if (
+                        !unvisited.has(
+                            neighborId,
+                        )
+                    ) {
+                        continue;
+                    }
 
-                    if (!road?.enabled) continue;
-                    if (!unvisited.has(edge.to)) continue;
-
-                    unvisited.delete(edge.to);
-                    queue.push(edge.to);
+                    unvisited.delete(neighborId);
+                    queue.push(neighborId);
                 }
             }
 
-            this.componentMembers.set(componentId, members);
+            this.componentMembers.set(
+                componentId,
+                members,
+            );
         }
 
         this.#refreshCachedComponentIds();
@@ -798,6 +831,29 @@ export class Navigation {
             road.version === leg.roadVersion &&
             this.canTraverseRoad(road, mobility),
         );
+    }
+
+    isRouteCurrent(
+        route,
+        mobility,
+        startLegIndex = 0,
+    ) {
+        for (
+            let i = startLegIndex;
+            i < route.legs.length;
+            i++
+        ) {
+            if (
+                !this.isRouteLegCurrent(
+                    route.legs[i],
+                    mobility,
+                )
+            ) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     nodeAt(position, tolerance = 0.01) {
