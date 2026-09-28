@@ -1103,3 +1103,166 @@ test("arbitrary-position navigation entry can connect an off-network entity", ()
         1e-9,
     );
 });
+
+
+test("AABB queries include bodies intersecting the box and reuse buffers", () => {
+    const world = new World({ spatialCellSize: 10 });
+
+    world.addEntity({
+        id: "inside",
+        position: { x: 5, y: 5 },
+        body: { radius: 0.5 },
+    });
+    world.addEntity({
+        id: "touching",
+        position: { x: 11, y: 5 },
+        body: { radius: 1 },
+    });
+    world.addEntity({
+        id: "outside",
+        position: { x: 20, y: 5 },
+        body: { radius: 1 },
+    });
+
+    const buffer = world.createSpatialQueryBuffer();
+    const first = world.queryAabbInto(
+        0,
+        0,
+        10,
+        10,
+        buffer,
+    );
+
+    assert.strictEqual(first, buffer.results);
+    assert.deepEqual(
+        first.map(entity => entity.id).sort(),
+        ["inside", "touching"],
+    );
+
+    const second = world.queryAabbInto(
+        15,
+        0,
+        25,
+        10,
+        buffer,
+    );
+
+    assert.strictEqual(second, buffer.results);
+    assert.deepEqual(
+        second.map(entity => entity.id),
+        ["outside"],
+    );
+});
+
+test("segment and capsule queries use exact body distance", () => {
+    const world = new World({ spatialCellSize: 10 });
+
+    world.addEntity({
+        id: "on-line",
+        position: { x: 5, y: 0.5 },
+        body: { radius: 0.5 },
+    });
+    world.addEntity({
+        id: "capsule-only",
+        position: { x: 5, y: 2 },
+        body: { radius: 0.5 },
+    });
+    world.addEntity({
+        id: "far",
+        position: { x: 5, y: 5 },
+        body: { radius: 0.5 },
+    });
+
+    const a = { x: 0, y: 0 };
+    const b = { x: 10, y: 0 };
+
+    assert.deepEqual(
+        world.querySegment(a, b)
+            .map(entity => entity.id),
+        ["on-line"],
+    );
+
+    assert.deepEqual(
+        world.queryCapsule(a, b, 1.5)
+            .map(entity => entity.id)
+            .sort(),
+        ["capsule-only", "on-line"],
+    );
+});
+
+test("nearest query returns body-surface distance with deterministic tie-breaking", () => {
+    const world = new World({ spatialCellSize: 10 });
+
+    world.addEntity({
+        id: "b",
+        position: { x: 5, y: 0 },
+        body: { radius: 1 },
+    });
+    world.addEntity({
+        id: "a",
+        position: { x: -5, y: 0 },
+        body: { radius: 1 },
+    });
+    world.addEntity({
+        id: "far",
+        position: { x: 100, y: 0 },
+        body: { radius: 1 },
+    });
+
+    const nearest = world.queryNearest(
+        { x: 0, y: 0 },
+        { maxDistance: 10 },
+    );
+
+    assert.equal(nearest.entity.id, "a");
+    assert.equal(nearest.distance, 4);
+    assert.equal(nearest.centerDistance, 5);
+
+    assert.equal(
+        world.queryNearest(
+            { x: 0, y: 0 },
+            {
+                maxDistance: 10,
+                predicate: entity =>
+                    entity.id === "far",
+            },
+        ),
+        null,
+    );
+});
+
+test("capsule queries honor exclusion and predicates", () => {
+    const world = new World();
+
+    world.addEntity({
+        id: "self",
+        kind: "person",
+        position: { x: 1, y: 0 },
+    });
+    world.addEntity({
+        id: "person",
+        kind: "person",
+        position: { x: 2, y: 0 },
+    });
+    world.addEntity({
+        id: "cart",
+        kind: "cart",
+        position: { x: 3, y: 0 },
+    });
+
+    const results = world.queryCapsule(
+        { x: 0, y: 0 },
+        { x: 5, y: 0 },
+        1,
+        {
+            excludeId: "self",
+            predicate: entity =>
+                entity.kind === "person",
+        },
+    );
+
+    assert.deepEqual(
+        results.map(entity => entity.id),
+        ["person"],
+    );
+});
