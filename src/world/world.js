@@ -12,6 +12,7 @@ export class World {
         obstacleCellSize = spatialCellSize,
         movementLodTiers = null,
         interestPoints = [],
+        simulationRegions = [],
         localSteering = null,
         captureEvents = false,
         eventQueueLimit = 10000,
@@ -52,6 +53,19 @@ export class World {
 
         this.movementLodTiers = null;
         this.interestPoints = [];
+
+        this.simulationRegions =
+            new Map();
+
+        for (
+            const region of
+            simulationRegions
+        ) {
+            this.addSimulationRegion(
+                region,
+                { refresh: false },
+            );
+        }
 
         this.localSteering = null;
         this.localSteeringQueryBuffer =
@@ -110,7 +124,34 @@ export class World {
             return interval === 0 ? null : interval;
         }
 
+        const simulationRegion =
+            this.simulationRegionAt(
+                entity.position,
+            );
+
+        if (
+            simulationRegion &&
+            simulationRegion.movementInterval != null
+        ) {
+            const interval =
+                Math.max(
+                    0,
+                    simulationRegion.movementInterval,
+                );
+
+            return interval === 0
+                ? null
+                : interval;
+        }
+
         if (!this.hasDynamicMovementLod()) {
+            return null;
+        }
+
+        if (
+            !this.movementLodTiers?.length ||
+            this.interestPoints.length === 0
+        ) {
             return null;
         }
 
@@ -600,6 +641,225 @@ export class World {
         this.localSteering.enabled = false;
     }
 
+    addSimulationRegion(
+        {
+            id,
+            minX,
+            minY,
+            maxX,
+            maxY,
+            priority = 0,
+            detailLevel = "full",
+            movementInterval = null,
+            enabled = true,
+        },
+        { refresh = true } = {},
+    ) {
+        if (
+            typeof id !== "string" ||
+            id.length === 0
+        ) {
+            throw new Error(
+                "Simulation region id must be a non-empty string",
+            );
+        }
+
+        if (
+            this.simulationRegions.has(id)
+        ) {
+            throw new Error(
+                `Simulation region already exists: ${id}`,
+            );
+        }
+
+        if (
+            ![
+                minX,
+                minY,
+                maxX,
+                maxY,
+            ].every(Number.isFinite) ||
+            minX > maxX ||
+            minY > maxY
+        ) {
+            throw new Error(
+                `Invalid simulation region bounds: ${id}`,
+            );
+        }
+
+        if (
+            !Number.isFinite(priority)
+        ) {
+            throw new Error(
+                "Simulation region priority must be finite",
+            );
+        }
+
+        if (
+            typeof detailLevel !==
+                "string" ||
+            detailLevel.length === 0
+        ) {
+            throw new Error(
+                "Simulation region detailLevel must be a non-empty string",
+            );
+        }
+
+        if (
+            movementInterval != null &&
+            !(
+                Number.isFinite(
+                    movementInterval,
+                ) &&
+                movementInterval >= 0
+            )
+        ) {
+            throw new Error(
+                "Simulation region movementInterval must be null or a finite number >= 0",
+            );
+        }
+
+        const region = {
+            id,
+            minX,
+            minY,
+            maxX,
+            maxY,
+            priority,
+            detailLevel,
+            movementInterval,
+            enabled:
+                Boolean(enabled),
+        };
+
+        this.simulationRegions.set(
+            id,
+            region,
+        );
+
+        if (refresh) {
+            this.refreshAllMovementLod();
+        }
+
+        return region;
+    }
+
+    replaceSimulationRegion(
+        regionId,
+        patch,
+    ) {
+        const current =
+            this.simulationRegions.get(
+                regionId,
+            );
+
+        if (!current) {
+            throw new Error(
+                `Unknown simulation region: ${regionId}`,
+            );
+        }
+
+        this.simulationRegions.delete(
+            regionId,
+        );
+
+        try {
+            return this.addSimulationRegion(
+                {
+                    ...current,
+                    ...patch,
+                    id: regionId,
+                },
+            );
+        } catch (error) {
+            this.simulationRegions.set(
+                regionId,
+                current,
+            );
+            throw error;
+        }
+    }
+
+    removeSimulationRegion(
+        regionId,
+    ) {
+        const removed =
+            this.simulationRegions.delete(
+                regionId,
+            );
+
+        if (removed) {
+            this.refreshAllMovementLod();
+        }
+
+        return removed;
+    }
+
+    simulationRegionAt(position) {
+        let best = null;
+        let bestArea = Infinity;
+
+        for (
+            const region of
+            this.simulationRegions.values()
+        ) {
+            if (!region.enabled) {
+                continue;
+            }
+
+            if (
+                position.x < region.minX ||
+                position.x > region.maxX ||
+                position.y < region.minY ||
+                position.y > region.maxY
+            ) {
+                continue;
+            }
+
+            const area =
+                (region.maxX -
+                    region.minX) *
+                (region.maxY -
+                    region.minY);
+
+            if (
+                !best ||
+                region.priority >
+                    best.priority ||
+                (
+                    region.priority ===
+                        best.priority &&
+                    area < bestArea
+                ) ||
+                (
+                    region.priority ===
+                        best.priority &&
+                    area === bestArea &&
+                    region.id <
+                        best.id
+                )
+            ) {
+                best = region;
+                bestArea = area;
+            }
+        }
+
+        return best;
+    }
+
+    getEntitySimulationRegion(
+        entityId,
+    ) {
+        const entity =
+            this.entities.get(entityId);
+
+        if (!entity) return null;
+
+        return this.simulationRegionAt(
+            entity.position,
+        );
+    }
+
     configureMovementLod(tiers) {
         if (!Array.isArray(tiers) || tiers.length === 0) {
             this.movementLodTiers = null;
@@ -721,6 +981,15 @@ export class World {
     }
 
     hasDynamicMovementLod() {
+        if (
+            [...this.simulationRegions.values()]
+                .some(region =>
+                    region.enabled &&
+                    region.movementInterval != null)
+        ) {
+            return true;
+        }
+
         return Boolean(
             this.movementLodTiers?.length &&
             this.interestPoints.length > 0
@@ -1098,6 +1367,14 @@ export class World {
                 this.eventQueueLimit,
             droppedEventCount:
                 this.droppedEventCount,
+            simulationRegionCount:
+                this.simulationRegions.size,
+            scheduledSimulationRegionCount:
+                [...this.simulationRegions.values()]
+                    .filter(region =>
+                        region.enabled &&
+                        region.movementInterval != null)
+                    .length,
         };
     }
 
@@ -1197,6 +1474,49 @@ export class World {
             ) {
                 throw new Error(
                     `Movement accumulator missing bucket: ${interval}`,
+                );
+            }
+        }
+
+        for (
+            const [regionId, region] of
+            this.simulationRegions
+        ) {
+            if (
+                region.id !== regionId
+            ) {
+                throw new Error(
+                    `Simulation region id mismatch: ${regionId}`,
+                );
+            }
+
+            if (
+                ![
+                    region.minX,
+                    region.minY,
+                    region.maxX,
+                    region.maxY,
+                    region.priority,
+                ].every(Number.isFinite) ||
+                region.minX > region.maxX ||
+                region.minY > region.maxY
+            ) {
+                throw new Error(
+                    `Invalid simulation region state: ${regionId}`,
+                );
+            }
+
+            if (
+                region.movementInterval != null &&
+                !(
+                    Number.isFinite(
+                        region.movementInterval,
+                    ) &&
+                    region.movementInterval >= 0
+                )
+            ) {
+                throw new Error(
+                    `Invalid simulation region movement interval: ${regionId}`,
                 );
             }
         }
