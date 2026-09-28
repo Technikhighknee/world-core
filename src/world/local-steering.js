@@ -1,4 +1,5 @@
 import { closestPointOnPolyline } from "./geometry.js";
+import { closestPointOnObstacle } from "./obstacle-field.js";
 
 const EPSILON = 1e-9;
 
@@ -304,6 +305,132 @@ export function createLocalSteeringContext(
         lateralForce += side * weight;
     }
 
+    let relevantObstacles = 0;
+
+    if (config.obstacleLookahead > 0) {
+        const obstacles =
+            world.queryObstaclesRadiusInto(
+                {
+                    x: fromX,
+                    y: fromY,
+                },
+                config.obstacleLookahead,
+            );
+
+        for (const obstacle of obstacles) {
+            const closest =
+                closestPointOnObstacle(
+                    {
+                        x: fromX,
+                        y: fromY,
+                    },
+                    obstacle,
+                );
+
+            const ox =
+                closest.point.x - fromX;
+            const oy =
+                closest.point.y - fromY;
+            const along =
+                ox * dirX +
+                oy * dirY;
+            const lateral =
+                ox * normalX +
+                oy * normalY;
+
+            if (
+                Math.abs(lateral) >
+                road.width / 2 +
+                    selfRadius +
+                    config.obstacleMargin
+            ) {
+                continue;
+            }
+
+            if (
+                along <
+                -(
+                    selfRadius +
+                    config.obstacleMargin
+                ) ||
+                along >
+                    config.obstacleLookahead
+            ) {
+                continue;
+            }
+
+            relevantObstacles++;
+
+            const clearance =
+                selfRadius +
+                config.obstacleMargin;
+            const dangerWeight =
+                closest.distance <
+                clearance
+                    ? 1 -
+                        closest.distance /
+                            Math.max(
+                                clearance,
+                                EPSILON,
+                            )
+                    : 0;
+
+            const approachWeight =
+                Math.max(
+                    0,
+                    1 -
+                        closest.distance /
+                            Math.max(
+                                config.obstacleLookahead,
+                                EPSILON,
+                            ),
+                );
+
+            const weight =
+                Math.max(
+                    dangerWeight,
+                    along >= 0
+                        ? approachWeight * 0.5
+                        : 0,
+                );
+
+            if (weight > 0) {
+                let side;
+
+                if (
+                    Math.abs(lateral) >
+                    EPSILON
+                ) {
+                    side =
+                        lateral > 0
+                            ? -1
+                            : 1;
+                } else {
+                    side =
+                        config.trafficSide ===
+                        "right"
+                            ? -1
+                            : 1;
+                }
+
+                lateralForce +=
+                    side *
+                    config.obstacleStrength *
+                    weight;
+            }
+
+            if (
+                along >= 0 &&
+                along <=
+                    config.obstacleLookahead
+            ) {
+                forwardPressure +=
+                    approachWeight *
+                    config.obstacleForwardPressure;
+            }
+        }
+    }
+
     const usableHalfWidth = Math.max(
         0,
         road.width / 2 -
@@ -391,6 +518,7 @@ export function createLocalSteeringContext(
         usableHalfWidth,
         speedMultiplier,
         neighborCount: relevantNeighbors,
+        obstacleCount: relevantObstacles,
         occupancyRatio,
     };
 }
