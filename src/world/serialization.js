@@ -5,7 +5,7 @@ import { Navigation } from "./navigation.js";
 import { World } from "./world.js";
 
 const FORMAT = "world-core";
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
 
 function clone(value) {
     return value == null
@@ -68,6 +68,8 @@ function serializeNavigation(navigation) {
             id: node.id,
             x: node.position.x,
             y: node.position.y,
+            junctionRadius:
+                node.junctionRadius ?? 0,
         }));
 
     const roads = [...navigation.roads.values()]
@@ -89,6 +91,28 @@ function serializeNavigation(navigation) {
             blockedProfiles:
                 clone(road.blockedProfiles),
             tags: clone(road.tags),
+            effects:
+                [...(
+                    navigation.roadEffects
+                        .get(road.id)
+                        ?.entries() ?? []
+                )]
+                    .sort(
+                        ([a], [b]) =>
+                            String(a)
+                                .localeCompare(
+                                    String(b),
+                                ),
+                    )
+                    .map(
+                        ([id, effect]) => ({
+                            id,
+                            blocked:
+                                effect.blocked,
+                            costMultiplier:
+                                effect.costMultiplier,
+                        }),
+                    ),
             version: road.version,
         }));
 
@@ -140,6 +164,22 @@ function deserializeNavigation(data) {
             tags: roadData.tags,
         });
 
+        for (
+            const effect of
+            roadData.effects ?? []
+        ) {
+            navigation.setRoadEffect(
+                effect.id,
+                road.id,
+                {
+                    blocked:
+                        effect.blocked,
+                    costMultiplier:
+                        effect.costMultiplier,
+                },
+            );
+        }
+
         road.version = roadData.version;
     }
 
@@ -162,6 +202,33 @@ function serializeLodTiers(world) {
             interval: tier.interval,
         }),
     );
+}
+
+function serializeObstacles(world) {
+    return [
+        ...world.obstacles
+            .obstacles.values(),
+    ]
+        .sort((a, b) =>
+            String(a.id).localeCompare(
+                String(b.id),
+            ))
+        .map(obstacle =>
+            clone(obstacle));
+}
+
+function deserializeObstacles(
+    world,
+    obstacles,
+) {
+    for (
+        const obstacle of
+        obstacles ?? []
+    ) {
+        world.addObstacle(
+            clone(obstacle),
+        );
+    }
 }
 
 function serializeEntities(world) {
@@ -335,6 +402,10 @@ export function serializeWorldCore(
             time: world.time,
             spatialCellSize:
                 world.spatial.cellSize,
+            obstacleCellSize:
+                world.obstacles.index.cellSize,
+            obstacles:
+                serializeObstacles(world),
             movementLodTiers:
                 serializeLodTiers(world),
             interestPoints:
@@ -377,6 +448,8 @@ export function deserializeWorldCore(
     const world = new World({
         spatialCellSize:
             snapshot.world.spatialCellSize,
+        obstacleCellSize:
+            snapshot.world.obstacleCellSize,
         movementLodTiers:
             snapshot.world.movementLodTiers,
         interestPoints:
@@ -388,6 +461,11 @@ export function deserializeWorldCore(
     });
 
     world.time = snapshot.world.time;
+
+    deserializeObstacles(
+        world,
+        snapshot.world.obstacles,
+    );
 
     deserializeEntities(
         world,
