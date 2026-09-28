@@ -13,6 +13,9 @@ import {
     deserializeWorldCore,
     serializeWorldCore,
 } from "../src/world/serialization.js";
+import {
+    validateWorldCoreSnapshot,
+} from "../src/world/snapshot-validation.js";
 import { SpatialHash } from "../src/world/spatial-hash.js";
 import { StaticSpatialIndex } from "../src/world/static-spatial-index.js";
 import { World } from "../src/world/world.js";
@@ -3108,4 +3111,424 @@ test("snapshot round-trip preserves junction radii obstacles and transient road 
         .assertInternalConsistency();
     restored.navigation
         .assertInternalConsistency();
+});
+
+
+function buildValidationSnapshot() {
+    const navigation = new Navigation();
+
+    navigation.addNode({
+        id: "a",
+        x: 0,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "b",
+        x: 10,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "c",
+        x: 20,
+        y: 0,
+    });
+
+    navigation.addRoad({
+        id: "ab",
+        from: "a",
+        to: "b",
+    });
+    navigation.addRoad({
+        id: "bc",
+        from: "b",
+        to: "c",
+    });
+
+    const world = new World({
+        movementLodTiers: [
+            {
+                maxDistance: Infinity,
+                interval: 10,
+            },
+        ],
+        interestPoints: [
+            { x: 0, y: 0 },
+        ],
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        body: { radius: 0.35 },
+        mobility:
+            mobilityProfile(
+                "pedestrian",
+            ),
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "walker",
+        "c",
+    );
+
+    return serializeWorldCore(
+        world,
+        navigation,
+    );
+}
+
+test("snapshot validation accepts a complete live snapshot before restore", () => {
+    const snapshot =
+        buildValidationSnapshot();
+
+    assert.equal(
+        validateWorldCoreSnapshot(
+            snapshot,
+        ),
+        true,
+    );
+
+    const restored =
+        deserializeWorldCore(
+            structuredClone(
+                snapshot,
+            ),
+        );
+
+    restored.world
+        .assertInternalConsistency();
+    restored.navigation
+        .assertInternalConsistency();
+});
+
+test("snapshot validation rejects duplicate ids and missing graph references", () => {
+    const duplicateNode =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    duplicateNode.navigation.nodes[1].id =
+        duplicateNode.navigation.nodes[0].id;
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                duplicateNode,
+            ),
+        /duplicate id/,
+    );
+
+    const missingNode =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    missingNode.navigation.roads[0].from =
+        "missing-node";
+
+    assert.throws(
+        () =>
+            deserializeWorldCore(
+                missingNode,
+            ),
+        /references missing node/,
+    );
+
+    const duplicateEntity =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    duplicateEntity.entities.push(
+        structuredClone(
+            duplicateEntity.entities[0],
+        ),
+    );
+    duplicateEntity.entityOrder.push(
+        "walker",
+    );
+    duplicateEntity.movingOrder.push(
+        "walker",
+    );
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                duplicateEntity,
+            ),
+        /duplicate id/,
+    );
+});
+
+test("snapshot validation rejects non-finite coordinates and negative body radii", () => {
+    const nanPosition =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    nanPosition.entities[0]
+        .entity.position.x =
+        Number.NaN;
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                nanPosition,
+            ),
+        /expected finite number/,
+    );
+
+    const infiniteNode =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    infiniteNode.navigation.nodes[0].x =
+        Infinity;
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                infiniteNode,
+            ),
+        /expected finite number/,
+    );
+
+    const negativeRadius =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    negativeRadius.entities[0]
+        .entity.body.radius =
+        -0.1;
+
+    assert.throws(
+        () =>
+            deserializeWorldCore(
+                negativeRadius,
+            ),
+        /expected number >= 0/,
+    );
+});
+
+test("snapshot validation rejects malformed journey references and indices", () => {
+    const missingRoute =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    missingRoute.entities[0]
+        .journey.routeId =
+        999;
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                missingRoute,
+            ),
+        /references missing route/,
+    );
+
+    const wrongDestination =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    wrongDestination.entities[0]
+        .journey.destinationNodeId =
+        "b";
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                wrongDestination,
+            ),
+        /does not match route destination/,
+    );
+
+    const badLegIndex =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    badLegIndex.entities[0]
+        .journey.legIndex =
+        999;
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                badLegIndex,
+            ),
+        /exceeds route leg count/,
+    );
+
+    const badPointIndex =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    badPointIndex.entities[0]
+        .journey.pointIndex =
+        999;
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                badPointIndex,
+            ),
+        /outside current road point range/,
+    );
+});
+
+test("snapshot validation rejects invalid route continuity and reverse one-way legs", () => {
+    const disconnected =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    disconnected.routes[0].legs = [
+        structuredClone(
+            disconnected.routes[0]
+                .legs[1],
+        ),
+    ];
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                disconnected,
+            ),
+        /route leg is not connected|route does not end/,
+    );
+
+    const reverseOneWay =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    reverseOneWay.navigation.roads[0]
+        .bidirectional =
+        false;
+    reverseOneWay.routes[0].legs[0]
+        .reversed =
+        true;
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                reverseOneWay,
+            ),
+        /uses one-way road in reverse/,
+    );
+});
+
+test("snapshot validation rejects unknown mobility profiles and invalid scheduler state", () => {
+    const unknownProfile =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    unknownProfile.entities[0]
+        .mobility.profileId =
+        "not-a-real-profile";
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                unknownProfile,
+            ),
+        /unknown mobility profile/,
+    );
+
+    const emptyLod =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    emptyLod.world.movementLodTiers =
+        [];
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                emptyLod,
+            ),
+        /non-empty array/,
+    );
+
+    const duplicateAccumulator =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    duplicateAccumulator.world
+        .movementAccumulators =
+        [
+            [10, 1],
+            [10, 2],
+        ];
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                duplicateAccumulator,
+            ),
+        /duplicate movement interval/,
+    );
+
+    const unknownAccumulator =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    unknownAccumulator.world
+        .movementAccumulators =
+        [[5, 1]];
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                unknownAccumulator,
+            ),
+        /not present in movement LOD tiers/,
+    );
+});
+
+test("snapshot validation rejects incomplete or inconsistent execution order", () => {
+    const missingEntityOrder =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    missingEntityOrder.entityOrder =
+        [];
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                missingEntityOrder,
+            ),
+        /must contain every entity exactly once/,
+    );
+
+    const movingWithoutJourney =
+        structuredClone(
+            buildValidationSnapshot(),
+        );
+
+    movingWithoutJourney.entities[0]
+        .journey =
+        null;
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                movingWithoutJourney,
+            ),
+        /moving entity has no journey|must contain every entity with an active journey/,
+    );
 });
