@@ -388,7 +388,7 @@ export function validateWorldCoreSnapshot(
     {
         expectedFormat =
             "world-core",
-        expectedVersion = 2,
+        expectedVersion = 3,
     } = {},
 ) {
     requireObject(
@@ -438,6 +438,45 @@ export function validateWorldCoreSnapshot(
         navigation.routeCacheMaxTotalLegs,
         "$.navigation.routeCacheMaxTotalLegs",
     );
+    requireInteger(
+        navigation.hierarchicalRouteCacheSize,
+        "$.navigation.hierarchicalRouteCacheSize",
+    );
+    requireInteger(
+        navigation.regionalRouteCacheSize,
+        "$.navigation.regionalRouteCacheSize",
+    );
+
+    const regions =
+        requireArray(
+            navigation.regions ?? [],
+            "$.navigation.regions",
+        );
+
+    const regionIds =
+        requireUniqueIds(
+            regions,
+            "$.navigation.regions",
+            region => {
+                requireObject(
+                    region,
+                    "$.navigation.regions[]",
+                );
+
+                if (
+                    typeof region.id !==
+                        "string" ||
+                    region.id.length === 0
+                ) {
+                    fail(
+                        "$.navigation.regions[].id",
+                        "expected non-empty string",
+                    );
+                }
+
+                return region.id;
+            },
+        );
 
     const nodes =
         requireArray(
@@ -487,6 +526,20 @@ export function validateWorldCoreSnapshot(
             node.junctionRadius ?? 0,
             `${path}.junctionRadius`,
         );
+
+        if (
+            node.regionId !== null &&
+            node.regionId !== undefined &&
+            !regionIds.has(
+                "string:" +
+                String(node.regionId),
+            )
+        ) {
+            fail(
+                `${path}.regionId`,
+                "references missing navigation region",
+            );
+        }
     }
 
     const roads =
@@ -733,6 +786,106 @@ export function validateWorldCoreSnapshot(
         requirePoint(
             interestPoints[index],
             `$.world.interestPoints[${index}]`,
+        );
+    }
+
+    const simulationRegions =
+        requireArray(
+            world.simulationRegions ?? [],
+            "$.world.simulationRegions",
+        );
+
+    requireUniqueIds(
+        simulationRegions,
+        "$.world.simulationRegions",
+        region => {
+            requireObject(
+                region,
+                "$.world.simulationRegions[]",
+            );
+
+            if (
+                typeof region.id !==
+                    "string" ||
+                region.id.length === 0
+            ) {
+                fail(
+                    "$.world.simulationRegions[].id",
+                    "expected non-empty string",
+                );
+            }
+
+            return region.id;
+        },
+    );
+
+    for (
+        let index = 0;
+        index < simulationRegions.length;
+        index++
+    ) {
+        const region =
+            simulationRegions[index];
+        const path =
+            `$.world.simulationRegions[${index}]`;
+
+        requireFinite(
+            region.minX,
+            `${path}.minX`,
+        );
+        requireFinite(
+            region.minY,
+            `${path}.minY`,
+        );
+        requireFinite(
+            region.maxX,
+            `${path}.maxX`,
+        );
+        requireFinite(
+            region.maxY,
+            `${path}.maxY`,
+        );
+
+        if (
+            region.minX > region.maxX ||
+            region.minY > region.maxY
+        ) {
+            fail(
+                path,
+                "invalid simulation region bounds",
+            );
+        }
+
+        requireFinite(
+            region.priority,
+            `${path}.priority`,
+        );
+
+        if (
+            typeof region.detailLevel !==
+                "string" ||
+            region.detailLevel.length ===
+                0
+        ) {
+            fail(
+                `${path}.detailLevel`,
+                "expected non-empty string",
+            );
+        }
+
+        if (
+            region.movementInterval !==
+            null
+        ) {
+            requireNonNegative(
+                region.movementInterval,
+                `${path}.movementInterval`,
+            );
+        }
+
+        requireBoolean(
+            region.enabled,
+            `${path}.enabled`,
         );
     }
 

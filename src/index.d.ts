@@ -69,7 +69,13 @@ export interface NavigationNode {
     id: NavigationId;
     position: Vec2;
     junctionRadius: number;
+    regionId: string | null;
     componentId: number;
+}
+
+export interface NavigationRegion {
+    id: string;
+    nodeIds: Set<NavigationId>;
 }
 
 export interface Road {
@@ -127,6 +133,30 @@ export interface MovementLodTier {
     interval: number;
 }
 
+export interface SimulationRegion {
+    id: string;
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    priority: number;
+    detailLevel: string;
+    movementInterval: number | null;
+    enabled: boolean;
+}
+
+export interface SimulationRegionInput {
+    id: string;
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+    priority?: number;
+    detailLevel?: string;
+    movementInterval?: number | null;
+    enabled?: boolean;
+}
+
 export interface LocalSteeringOptions {
     enabled?: boolean;
     neighborRadius?: number;
@@ -159,6 +189,7 @@ export interface WorldOptions {
     obstacleCellSize?: number;
     movementLodTiers?: readonly MovementLodTier[] | null;
     interestPoints?: readonly Vec2[];
+    simulationRegions?: readonly SimulationRegionInput[];
     localSteering?: LocalSteeringOptions | null;
     captureEvents?: boolean;
     eventQueueLimit?: number;
@@ -244,6 +275,8 @@ export interface WorldDiagnostics {
     eventQueueSize: number;
     eventQueueLimit: number;
     droppedEventCount: number;
+    simulationRegionCount: number;
+    scheduledSimulationRegionCount: number;
 }
 
 export class World<T extends Entity = Entity> {
@@ -258,6 +291,7 @@ export class World<T extends Entity = Entity> {
     droppedEventCount: number;
     localSteering: LocalSteeringConfig | { enabled: false } | null;
     interestPoints: Vec2[];
+    readonly simulationRegions: Map<string, SimulationRegion>;
 
     configureEventQueue(options?: {
         limit?: number;
@@ -302,6 +336,18 @@ export class World<T extends Entity = Entity> {
 
     configureLocalSteering(options?: LocalSteeringOptions): LocalSteeringConfig;
     disableLocalSteering(): void;
+
+    addSimulationRegion(
+        region: SimulationRegionInput,
+        options?: { refresh?: boolean },
+    ): SimulationRegion;
+    replaceSimulationRegion(
+        regionId: string,
+        patch: Partial<SimulationRegionInput>,
+    ): SimulationRegion;
+    removeSimulationRegion(regionId: string): boolean;
+    simulationRegionAt(position: Vec2): SimulationRegion | null;
+    getEntitySimulationRegion(entityId: EntityId): SimulationRegion | null;
 
     configureMovementLod(tiers: readonly MovementLodTier[]): void;
     setInterestPoints(points: readonly Vec2[]): void;
@@ -379,11 +425,18 @@ export interface NavigationOptions {
     routeCacheSize?: number;
     routeCacheMaxLegs?: number;
     routeCacheMaxTotalLegs?: number;
+    hierarchicalRouteCacheSize?: number;
+    regionalRouteCacheSize?: number;
 }
 
 export interface NavigationDiagnostics {
     nodeCount: number;
     roadCount: number;
+    regionCount: number;
+    regionAssignedNodes: number;
+    regionGatewayCount: number;
+    hierarchicalRouteCacheSize: number;
+    regionalRouteCacheSize: number;
     roadEffectRoadCount: number;
     roadEffectCount: number;
     adjacencyNodeCount: number;
@@ -405,16 +458,23 @@ export class Navigation {
     readonly nodes: Map<NavigationId, NavigationNode>;
     readonly roads: Map<NavigationId, Road>;
     readonly roadEffects: Map<NavigationId, Map<string, RoadEffect>>;
+    readonly regions: Map<string, NavigationRegion>;
     graphRevision: number;
 
     invalidateRoadRoutes(roadId: NavigationId): void;
     invalidateAllRoutes(): void;
+
+    addRegion(input: { id: string }): NavigationRegion;
+    removeRegion(regionId: string): boolean;
+    setNodeRegion(nodeId: NavigationId, regionId: string | null): boolean;
+    getRegionGateways(regionId: string): NavigationNode[];
 
     addNode(input: {
         id: NavigationId;
         x: number;
         y: number;
         junctionRadius?: number;
+        regionId?: string | null;
     }): NavigationNode;
     setNodeJunctionRadius(nodeId: NavigationId, junctionRadius: number): boolean;
     removeNode(nodeId: NavigationId): boolean;
@@ -489,6 +549,12 @@ export class Navigation {
         mobility: Mobility,
         options?: JourneyStartOptions,
     ): RoutePlan | null;
+
+    findHierarchicalRoute(
+        startNodeId: NavigationId,
+        destinationNodeId: NavigationId,
+        mobility: Mobility,
+    ): Route | null;
 
     findRoute(
         startNodeId: NavigationId,
