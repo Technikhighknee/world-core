@@ -1,3 +1,7 @@
+import {
+    MOBILITY_PROFILES,
+} from "./mobility-profiles.js";
+
 function fail(path, message) {
     throw new Error(
         `Invalid world-core snapshot at ${path}: ${message}`,
@@ -354,6 +358,17 @@ function validateMobility(
             fail(
                 `${path}.profileId`,
                 "expected non-empty profile id",
+            );
+        }
+
+        if (
+            !MOBILITY_PROFILES[
+                mobility.profileId
+            ]
+        ) {
+            fail(
+                `${path}.profileId`,
+                "unknown mobility profile",
             );
         }
 
@@ -745,6 +760,14 @@ export function validateWorldCoreSnapshot(
                 world.movementLodTiers,
                 "$.world.movementLodTiers",
             );
+
+        if (tiers.length === 0) {
+            fail(
+                "$.world.movementLodTiers",
+                "expected null or a non-empty array",
+            );
+        }
+
         let previous =
             -Infinity;
 
@@ -965,6 +988,14 @@ export function validateWorldCoreSnapshot(
         }
     }
 
+    const routeById =
+        new Map(
+            routes.map(route => [
+                route.id,
+                route,
+            ]),
+        );
+
     const entities =
         requireArray(
             snapshot.entities,
@@ -1078,6 +1109,25 @@ export function validateWorldCoreSnapshot(
                 );
             }
 
+            const route =
+                routeById.get(
+                    journey.routeId,
+                );
+
+            if (
+                nodeKey(
+                    journey.destinationNodeId,
+                ) !==
+                nodeKey(
+                    route.destinationNodeId,
+                )
+            ) {
+                fail(
+                    `${path}.journey.destinationNodeId`,
+                    "does not match route destination",
+                );
+            }
+
             requireInteger(
                 journey.legIndex,
                 `${path}.journey.legIndex`,
@@ -1086,6 +1136,16 @@ export function validateWorldCoreSnapshot(
                 journey.pointIndex,
                 `${path}.journey.pointIndex`,
             );
+
+            if (
+                journey.legIndex >
+                route.legs.length
+            ) {
+                fail(
+                    `${path}.journey.legIndex`,
+                    "exceeds route leg count",
+                );
+            }
 
             if (
                 journey.entryPoint !==
@@ -1129,6 +1189,63 @@ export function validateWorldCoreSnapshot(
                     `${path}.journey.prefixLeg.roadVersion`,
                     1,
                 );
+
+                if (
+                    prefix.startSegmentIndex !==
+                    undefined
+                ) {
+                    requireInteger(
+                        prefix.startSegmentIndex,
+                        `${path}.journey.prefixLeg.startSegmentIndex`,
+                    );
+
+                    const prefixRoad =
+                        roadByKey.get(
+                            nodeKey(
+                                prefix.roadId,
+                            ),
+                        );
+
+                    if (
+                        prefix.startSegmentIndex >=
+                        prefixRoad.shape.length + 1
+                    ) {
+                        fail(
+                            `${path}.journey.prefixLeg.startSegmentIndex`,
+                            "outside road segment range",
+                        );
+                    }
+                }
+            }
+
+            const currentLeg =
+                journey.prefixLeg ??
+                route.legs[
+                    journey.legIndex
+                ] ??
+                null;
+
+            if (currentLeg) {
+                const currentRoad =
+                    roadByKey.get(
+                        nodeKey(
+                            currentLeg.roadId,
+                        ),
+                    );
+
+                const pointCount =
+                    currentRoad.shape.length +
+                    2;
+
+                if (
+                    journey.pointIndex >=
+                    pointCount
+                ) {
+                    fail(
+                        `${path}.journey.pointIndex`,
+                        "outside current road point range",
+                    );
+                }
             }
         }
     }
@@ -1238,6 +1355,9 @@ export function validateWorldCoreSnapshot(
             "$.world.movementAccumulators",
         );
 
+    const accumulatorIntervals =
+        new Set();
+
     for (
         let index = 0;
         index <
@@ -1265,6 +1385,36 @@ export function validateWorldCoreSnapshot(
             pair[1],
             `$.world.movementAccumulators[${index}][1]`,
         );
+
+        if (
+            accumulatorIntervals.has(
+                pair[0],
+            )
+        ) {
+            fail(
+                `$.world.movementAccumulators[${index}][0]`,
+                "duplicate movement interval",
+            );
+        }
+
+        accumulatorIntervals.add(
+            pair[0],
+        );
+
+        if (
+            world.movementLodTiers !==
+            null &&
+            !world.movementLodTiers.some(
+                tier =>
+                    tier.interval ===
+                    pair[0],
+            )
+        ) {
+            fail(
+                `$.world.movementAccumulators[${index}][0]`,
+                "interval is not present in movement LOD tiers",
+            );
+        }
     }
 
     return true;
