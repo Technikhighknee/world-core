@@ -72,6 +72,11 @@ jobs:
           SNAPSHOT_MOVERS: 80
         run: npm run bench:snapshot
 
+      - name: Performance guardrail harness smoke
+        env:
+          GUARDRAIL_FAST: 1
+        run: npm run bench:guardrails
+
       - name: Retention benchmark smoke
         env:
           CHURN_CITIES: 2
