@@ -6,12 +6,17 @@ on:
       mode:
         description: Benchmark mode
         required: true
-        default: churn
+        default: guardrails
         type: choice
         options:
+          - guardrails
           - standard
           - churn
           - soak
+          - retention
+          - steering
+          - snapshot
+          - determinism
           - profile
 
 jobs:
@@ -28,6 +33,9 @@ jobs:
         run: |
           set -o pipefail
           case "${{ inputs.mode }}" in
+            guardrails)
+              npm run bench:guardrails 2>&1 | tee benchmark-output.txt
+              ;;
             standard)
               npm run bench 2>&1 | tee benchmark-output.txt
               ;;
@@ -36,6 +44,18 @@ jobs:
               ;;
             soak)
               npm run bench:soak 2>&1 | tee benchmark-output.txt
+              ;;
+            retention)
+              npm run bench:retention 2>&1 | tee benchmark-output.txt
+              ;;
+            steering)
+              npm run bench:steering 2>&1 | tee benchmark-output.txt
+              ;;
+            snapshot)
+              npm run bench:snapshot 2>&1 | tee benchmark-output.txt
+              ;;
+            determinism)
+              npm run bench:determinism 2>&1 | tee benchmark-output.txt
               ;;
             profile)
               npm run bench:profile 2>&1 | tee benchmark-output.txt
