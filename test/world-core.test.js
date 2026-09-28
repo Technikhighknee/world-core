@@ -3264,3 +3264,245 @@ test("local steering is independent of spatial bucket insertion order", () => {
         ),
     );
 });
+
+
+test("event queue is bounded with drop-newest overflow accounting", () => {
+    const world = new World({
+        captureEvents: true,
+        eventQueueLimit: 2,
+        eventOverflowPolicy: "drop-newest",
+    });
+
+    world.emitEvent("one");
+    world.emitEvent("two");
+    world.emitEvent("three");
+
+    assert.deepEqual(
+        world.peekEvents()
+            .map(event => event.type),
+        ["one", "two"],
+    );
+
+    assert.deepEqual(
+        world.getEventQueueStats(),
+        {
+            size: 2,
+            limit: 2,
+            overflowPolicy:
+                "drop-newest",
+            dropped: 1,
+        },
+    );
+
+    world.assertInternalConsistency();
+});
+
+test("event queue supports drop-oldest and throw overflow policies", () => {
+    const dropping = new World({
+        captureEvents: true,
+        eventQueueLimit: 2,
+        eventOverflowPolicy: "drop-oldest",
+    });
+
+    dropping.emitEvent("one");
+    dropping.emitEvent("two");
+    dropping.emitEvent("three");
+
+    assert.deepEqual(
+        dropping.peekEvents()
+            .map(event => event.type),
+        ["two", "three"],
+    );
+    assert.equal(
+        dropping.droppedEventCount,
+        1,
+    );
+
+    const throwing = new World({
+        captureEvents: true,
+        eventQueueLimit: 1,
+        eventOverflowPolicy: "throw",
+    });
+
+    throwing.emitEvent("one");
+
+    assert.throws(
+        () =>
+            throwing.emitEvent(
+                "two",
+            ),
+        /Event queue limit exceeded/,
+    );
+});
+
+test("event queue configuration can shrink safely and reset drop diagnostics", () => {
+    const world = new World({
+        captureEvents: true,
+        eventQueueLimit: 5,
+    });
+
+    for (let i = 0; i < 5; i++) {
+        world.emitEvent(
+            `event-${i}`,
+        );
+    }
+
+    world.configureEventQueue({
+        limit: 2,
+        overflowPolicy:
+            "drop-oldest",
+    });
+
+    assert.deepEqual(
+        world.peekEvents()
+            .map(event => event.type),
+        ["event-3", "event-4"],
+    );
+    assert.equal(
+        world.resetDroppedEventCount(),
+        3,
+    );
+    assert.equal(
+        world.droppedEventCount,
+        0,
+    );
+
+    world.configureEventQueue({
+        limit: 0,
+        overflowPolicy:
+            "drop-newest",
+    });
+    world.emitEvent("discarded");
+
+    assert.equal(
+        world.peekEvents().length,
+        0,
+    );
+    assert.equal(
+        world.droppedEventCount,
+        1,
+    );
+});
+
+test("movement interval churn does not retain empty scheduler buckets", () => {
+    const world = new World();
+    const navigation =
+        buildLineNavigation(1000);
+
+    world.addEntity({
+        id: "walker",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "walker",
+        "b",
+    );
+
+    for (
+        let interval = 1;
+        interval <= 250;
+        interval++
+    ) {
+        world.setMovementInterval(
+            "walker",
+            interval,
+        );
+
+        assert.equal(
+            world.movementBuckets.size,
+            1,
+        );
+        assert.equal(
+            world.movementAccumulators.size,
+            1,
+        );
+        assert.equal(
+            world.movementBuckets.has(
+                interval,
+            ),
+            true,
+        );
+    }
+
+    world.clearMovementInterval(
+        "walker",
+    );
+
+    assert.equal(
+        world.movementBuckets.size,
+        0,
+    );
+    assert.equal(
+        world.movementAccumulators.size,
+        0,
+    );
+
+    world.assertInternalConsistency();
+});
+
+test("event queue configuration survives snapshot round-trip while pending events remain transient", () => {
+    const world = new World({
+        captureEvents: true,
+        eventQueueLimit: 7,
+        eventOverflowPolicy:
+            "drop-oldest",
+    });
+    const navigation =
+        buildLineNavigation(10);
+
+    world.addEntity({
+        id: "walker",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "walker",
+        "b",
+    );
+
+    world.emitEvent(
+        "transient",
+    );
+
+    const restored =
+        deserializeWorldCore(
+            JSON.parse(
+                JSON.stringify(
+                    serializeWorldCore(
+                        world,
+                        navigation,
+                    ),
+                ),
+            ),
+        );
+
+    assert.equal(
+        restored.world.eventQueueLimit,
+        7,
+    );
+    assert.equal(
+        restored.world.eventOverflowPolicy,
+        "drop-oldest",
+    );
+    assert.equal(
+        restored.world.peekEvents().length,
+        0,
+    );
+});
