@@ -250,3 +250,14 @@ console.log(world.getEventQueueStats());
 Dropped-event counts are exposed for diagnostics. Event queue configuration is persisted, but pending events and drop counters remain transient.
 
 Movement scheduler buckets are also reclaimed as soon as their last entity leaves. Repeatedly assigning unique coarse-movement intervals therefore does not retain empty bucket/accumulator state. Route caches remain bounded by both route count and total cached legs.
+
+
+## Performance regression guardrails
+
+```bash
+npm run bench:guardrails
+```
+
+Guardrails deliberately use broad failure thresholds derived from the current full-scale GitHub Actions measurements. They are intended to catch catastrophic regressions rather than normal hosted-runner variance: 50k/20k movement p99 above 150 ms, churn heap above 512 MiB, RSS above 768 MiB, snapshot JSON above 64 MiB, snapshot validation above 1 s, restore above 3 s, 5k local-steering p99 above 75 ms, or steering cost above 50x the centerline baseline.
+
+Thresholds can be overridden with `GUARDRAIL_*` environment variables. CI uses `GUARDRAIL_FAST=1` only to verify the harness and parsers; the manual Performance workflow runs the full workloads.
