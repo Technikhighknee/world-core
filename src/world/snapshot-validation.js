@@ -388,7 +388,7 @@ export function validateWorldCoreSnapshot(
     {
         expectedFormat =
             "world-core",
-        expectedVersion = 3,
+        expectedVersion = 1,
     } = {},
 ) {
     requireObject(
