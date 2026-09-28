@@ -10,6 +10,9 @@ import {
 } from "../src/world/movement.js";
 import { stepSimulation } from "../src/world/simulation.js";
 import {
+    computeWorldCoreStateHash,
+} from "../src/world/state-hash.js";
+import {
     deserializeWorldCore,
     serializeWorldCore,
 } from "../src/world/serialization.js";
@@ -3107,4 +3110,156 @@ test("snapshot round-trip preserves junction radii obstacles and transient road 
         .assertInternalConsistency();
     restored.navigation
         .assertInternalConsistency();
+});
+
+
+test("local steering is independent of spatial bucket insertion order", () => {
+    function build() {
+        const navigation =
+            new Navigation({
+                spatialCellSize: 10,
+            });
+
+        navigation.addNode({
+            id: "west",
+            x: 0,
+            y: 0,
+        });
+        navigation.addNode({
+            id: "east",
+            x: 100,
+            y: 0,
+        });
+        navigation.addRoad({
+            id: "road",
+            from: "west",
+            to: "east",
+            width: 6,
+        });
+
+        const world =
+            new World({
+                spatialCellSize: 10,
+                localSteering: {
+                    neighborRadius: 4,
+                    separationStrength: 0.9,
+                    maxLateralSpeed: 1,
+                    centeringRate: 0.2,
+                    congestionStrength: 0.5,
+                    trafficSide: "right",
+                },
+            });
+
+        for (let i = 0; i < 12; i++) {
+            const id =
+                `walker-${String(i).padStart(2, "0")}`;
+
+            world.addEntity({
+                id,
+                position: {
+                    x: 20 + i * 0.15,
+                    y: 0,
+                },
+                body: {
+                    radius:
+                        0.3 +
+                        (i % 3) * 0.03,
+                },
+                mobility: {
+                    profileId:
+                        "bucket-order-test",
+                    speed:
+                        1 +
+                        (i % 4) * 0.05,
+                },
+            });
+
+            startJourney(
+                world,
+                navigation,
+                id,
+                "east",
+            );
+        }
+
+        return {
+            world,
+            navigation,
+        };
+    }
+
+    const left = build();
+    const right = build();
+
+    assert.equal(
+        computeWorldCoreStateHash(
+            left.world,
+            left.navigation,
+        ),
+        computeWorldCoreStateHash(
+            right.world,
+            right.navigation,
+        ),
+    );
+
+    let reversedSetCount = 0;
+
+    for (
+        const [key, cell] of
+        right.world.spatial.cells
+    ) {
+        if (
+            !(cell instanceof Set) ||
+            cell.size < 2
+        ) {
+            continue;
+        }
+
+        right.world.spatial.cells.set(
+            key,
+            new Set(
+                [...cell].reverse(),
+            ),
+        );
+        reversedSetCount++;
+    }
+
+    assert.ok(reversedSetCount > 0);
+
+    for (let tick = 0; tick < 200; tick++) {
+        stepSimulation(
+            left.world,
+            left.navigation,
+            0.05,
+        );
+        stepSimulation(
+            right.world,
+            right.navigation,
+            0.05,
+        );
+
+        if (tick % 20 === 0) {
+            assert.equal(
+                computeWorldCoreStateHash(
+                    left.world,
+                    left.navigation,
+                ),
+                computeWorldCoreStateHash(
+                    right.world,
+                    right.navigation,
+                ),
+            );
+        }
+    }
+
+    assert.equal(
+        computeWorldCoreStateHash(
+            left.world,
+            left.navigation,
+        ),
+        computeWorldCoreStateHash(
+            right.world,
+            right.navigation,
+        ),
+    );
 });
