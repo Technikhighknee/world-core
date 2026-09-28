@@ -112,3 +112,10 @@ const events = world.drainEvents();
 ```
 
 Movement emits deterministic lifecycle events for journey start, reroute, cancellation, completion and failure, plus road entry/exit transitions. `drainEvents(target)` can reuse a caller-owned array.
+
+
+## Save / load
+
+`serializeWorldCore(world, navigation)` returns a JSON-safe versioned snapshot. `deserializeWorldCore(snapshot)` restores a fresh `World` and `Navigation` pair.
+
+Snapshots preserve dynamic road state and versions, world time, entities, body state, mobility, active journeys, shared journey routes, movement LOD configuration and interval accumulators. Route caches and pending movement events are intentionally transient and are not restored.
