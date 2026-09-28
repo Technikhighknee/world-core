@@ -137,3 +137,17 @@ Movement emits deterministic lifecycle events for journey start, reroute, cancel
 `serializeWorldCore(world, navigation)` returns a JSON-safe versioned snapshot. `deserializeWorldCore(snapshot)` restores a fresh `World` and `Navigation` pair.
 
 Snapshots preserve dynamic road state and versions, world time, entities, body state, mobility, active journeys, shared journey routes, movement LOD configuration and interval accumulators. Route caches and pending movement events are intentionally transient and are not restored.
+
+
+## Steering stress and stability
+
+Local steering keeps a persistent lateral offset per entity and road direction. That offset is rate-limited, recenters gradually when conflicts disappear, uses a consistent traffic side for opposing movers, and uses deterministic pairwise separation for same-direction movers.
+
+A dedicated crowd benchmark compares the centerline baseline against local steering for configurable counterflow populations:
+
+```bash
+npm run bench:steering
+STEERING_COUNTS=100,500,1000,5000 npm run bench:steering
+```
+
+The benchmark reports p50/p95/p99/max tick latency, steering-to-baseline cost ratio, post-GC memory deltas, finite-position checks and road-corridor violations.
