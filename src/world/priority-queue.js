@@ -1,14 +1,21 @@
 export class MinPriorityQueue {
     constructor() {
         this.heap = [];
+        this.sequence = 0;
     }
 
     get size() {
         return this.heap.length;
     }
 
-    push(value, priority) {
-        const entry = { value, priority };
+    push(value, priority, tieBreaker = String(value)) {
+        const entry = {
+            value,
+            priority,
+            tieBreaker,
+            sequence: this.sequence++,
+        };
+
         this.heap.push(entry);
         this.#bubbleUp(this.heap.length - 1);
     }
@@ -27,12 +34,35 @@ export class MinPriorityQueue {
         return first;
     }
 
+    #compare(a, b) {
+        if (a.priority !== b.priority) {
+            return a.priority - b.priority;
+        }
+
+        if (a.tieBreaker < b.tieBreaker) return -1;
+        if (a.tieBreaker > b.tieBreaker) return 1;
+
+        return a.sequence - b.sequence;
+    }
+
     #bubbleUp(index) {
         while (index > 0) {
             const parent = Math.floor((index - 1) / 2);
-            if (this.heap[parent].priority <= this.heap[index].priority) break;
 
-            [this.heap[parent], this.heap[index]] = [this.heap[index], this.heap[parent]];
+            if (
+                this.#compare(
+                    this.heap[parent],
+                    this.heap[index],
+                ) <= 0
+            ) {
+                break;
+            }
+
+            [this.heap[parent], this.heap[index]] = [
+                this.heap[index],
+                this.heap[parent],
+            ];
+
             index = parent;
         }
     }
@@ -45,21 +75,31 @@ export class MinPriorityQueue {
 
             if (
                 left < this.heap.length &&
-                this.heap[left].priority < this.heap[smallest].priority
+                this.#compare(
+                    this.heap[left],
+                    this.heap[smallest],
+                ) < 0
             ) {
                 smallest = left;
             }
 
             if (
                 right < this.heap.length &&
-                this.heap[right].priority < this.heap[smallest].priority
+                this.#compare(
+                    this.heap[right],
+                    this.heap[smallest],
+                ) < 0
             ) {
                 smallest = right;
             }
 
             if (smallest === index) break;
 
-            [this.heap[index], this.heap[smallest]] = [this.heap[smallest], this.heap[index]];
+            [this.heap[index], this.heap[smallest]] = [
+                this.heap[smallest],
+                this.heap[index],
+            ];
+
             index = smallest;
         }
     }
