@@ -14,12 +14,23 @@ export class World {
         interestPoints = [],
         localSteering = null,
         captureEvents = false,
+        eventQueueLimit = 10000,
+        eventOverflowPolicy = "drop-newest",
     } = {}) {
         this.time = 0;
         this.entities = new Map();
 
         this.captureEvents = Boolean(captureEvents);
         this.events = [];
+        this.eventQueueLimit = 0;
+        this.eventOverflowPolicy = "drop-newest";
+        this.droppedEventCount = 0;
+
+        this.configureEventQueue({
+            limit: eventQueueLimit,
+            overflowPolicy:
+                eventOverflowPolicy,
+        });
 
         this.spatial = new SpatialHash(spatialCellSize);
         this.obstacles =
@@ -126,8 +137,19 @@ export class World {
         if (current === interval) return;
 
         if (current != null) {
-            this.movementBuckets.get(current)?.delete(entity);
+            const currentBucket =
+                this.movementBuckets.get(current);
+
+            currentBucket?.delete(entity);
             this.entityMovementIntervals.delete(entityId);
+
+            if (
+                currentBucket &&
+                currentBucket.size === 0
+            ) {
+                this.movementBuckets.delete(current);
+                this.movementAccumulators.delete(current);
+            }
         }
 
         if (interval == null) {
@@ -146,6 +168,87 @@ export class World {
         this.entityMovementIntervals.set(entityId, interval);
     }
 
+    configureEventQueue({
+        limit =
+            this.eventQueueLimit,
+        overflowPolicy =
+            this.eventOverflowPolicy,
+    } = {}) {
+        if (
+            !Number.isInteger(limit) ||
+            limit < 0
+        ) {
+            throw new Error(
+                "eventQueueLimit must be an integer greater than or equal to 0",
+            );
+        }
+
+        if (
+            overflowPolicy !==
+                "drop-newest" &&
+            overflowPolicy !==
+                "drop-oldest" &&
+            overflowPolicy !==
+                "throw"
+        ) {
+            throw new Error(
+                "eventOverflowPolicy must be \"drop-newest\", \"drop-oldest\", or \"throw\"",
+            );
+        }
+
+        this.eventQueueLimit = limit;
+        this.eventOverflowPolicy =
+            overflowPolicy;
+
+        if (
+            this.events.length >
+            limit
+        ) {
+            const overflow =
+                this.events.length -
+                limit;
+
+            if (limit === 0) {
+                this.events.length = 0;
+            } else {
+                this.events.splice(
+                    0,
+                    overflow,
+                );
+            }
+
+            this.droppedEventCount +=
+                overflow;
+        }
+
+        return {
+            limit:
+                this.eventQueueLimit,
+            overflowPolicy:
+                this.eventOverflowPolicy,
+        };
+    }
+
+    getEventQueueStats() {
+        return {
+            size: this.events.length,
+            limit:
+                this.eventQueueLimit,
+            overflowPolicy:
+                this.eventOverflowPolicy,
+            dropped:
+                this.droppedEventCount,
+        };
+    }
+
+    resetDroppedEventCount() {
+        const previous =
+            this.droppedEventCount;
+
+        this.droppedEventCount = 0;
+        return previous;
+    }
+
     setEventCapture(enabled) {
         this.captureEvents = Boolean(enabled);
 
@@ -156,6 +259,42 @@ export class World {
 
     emitEvent(type, data = {}) {
         if (!this.captureEvents) return null;
+
+        if (
+            this.events.length >=
+            this.eventQueueLimit
+        ) {
+            if (
+                this.eventOverflowPolicy ===
+                "throw"
+            ) {
+                throw new Error(
+                    `Event queue limit exceeded: ${this.eventQueueLimit}`,
+                );
+            }
+
+            this.droppedEventCount++;
+
+            if (
+                this.eventOverflowPolicy ===
+                "drop-newest"
+            ) {
+                return null;
+            }
+
+            if (
+                this.eventQueueLimit === 0
+            ) {
+                return null;
+            }
+
+            this.events.shift();
+        }
+
+        if (this.eventQueueLimit === 0) {
+            this.droppedEventCount++;
+            return null;
+        }
 
         const event = {
             time: this.time,
@@ -552,11 +691,22 @@ export class World {
         const interval = this.entityMovementIntervals.get(entityId);
 
         if (interval != null) {
+            const bucket =
+                this.movementBuckets.get(interval);
+
             if (entity) {
-                this.movementBuckets.get(interval)?.delete(entity);
+                bucket?.delete(entity);
             }
 
             this.entityMovementIntervals.delete(entityId);
+
+            if (
+                bucket &&
+                bucket.size === 0
+            ) {
+                this.movementBuckets.delete(interval);
+                this.movementAccumulators.delete(interval);
+            }
         }
     }
 
@@ -942,6 +1092,12 @@ export class World {
                 this.obstacles.obstacles.size,
             obstacleIndexMemberships:
                 this.obstacles.index.membershipCount(),
+            eventQueueSize:
+                this.events.length,
+            eventQueueLimit:
+                this.eventQueueLimit,
+            droppedEventCount:
+                this.droppedEventCount,
         };
     }
 
@@ -996,6 +1152,51 @@ export class World {
             if (!this.movingEntities.has(entityId)) {
                 throw new Error(
                     `Scheduled entity is not moving: ${entityId}`,
+                );
+            }
+        }
+
+        if (
+            diagnostics.eventQueueSize >
+            diagnostics.eventQueueLimit
+        ) {
+            throw new Error(
+                `Event queue overflow: ${diagnostics.eventQueueSize} events for limit ${diagnostics.eventQueueLimit}`,
+            );
+        }
+
+        for (
+            const [interval, bucket] of
+            this.movementBuckets
+        ) {
+            if (bucket.size === 0) {
+                throw new Error(
+                    `Empty movement bucket retained: ${interval}`,
+                );
+            }
+
+            if (
+                !this.movementAccumulators.has(
+                    interval,
+                )
+            ) {
+                throw new Error(
+                    `Movement bucket missing accumulator: ${interval}`,
+                );
+            }
+        }
+
+        for (
+            const interval of
+            this.movementAccumulators.keys()
+        ) {
+            if (
+                !this.movementBuckets.has(
+                    interval,
+                )
+            ) {
+                throw new Error(
+                    `Movement accumulator missing bucket: ${interval}`,
                 );
             }
         }

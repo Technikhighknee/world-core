@@ -482,6 +482,10 @@ export function serializeWorldCore(
                 clone(world.localSteering),
             captureEvents:
                 world.captureEvents,
+            eventQueueLimit:
+                world.eventQueueLimit,
+            eventOverflowPolicy:
+                world.eventOverflowPolicy,
             movementAccumulators:
                 [...world.movementAccumulators]
                     .sort(
@@ -530,6 +534,10 @@ export function deserializeWorldCore(
             snapshot.world.localSteering,
         captureEvents:
             snapshot.world.captureEvents,
+        eventQueueLimit:
+            snapshot.world.eventQueueLimit,
+        eventOverflowPolicy:
+            snapshot.world.eventOverflowPolicy,
     });
 
     world.time = snapshot.world.time;
