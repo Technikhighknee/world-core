@@ -2169,3 +2169,347 @@ test("navigation consistency diagnostics detect stale route cache versions", () 
         /stale road version/,
     );
 });
+
+
+test("counterflow steering puts opposing movers on opposite physical sides", () => {
+    const world = new World({
+        localSteering: {
+            neighborRadius: 8,
+            counterflowStrength: 1.2,
+            separationStrength: 1,
+            maxLateralSpeed: 1.5,
+            centeringRate: 0.2,
+            congestionStrength: 0,
+            trafficSide: "right",
+        },
+    });
+    const navigation = buildLineNavigation(100);
+
+    world.addEntity({
+        id: "eastbound",
+        position: { x: 48, y: 0 },
+        mobility: { speed: 1 },
+    });
+    world.addEntity({
+        id: "westbound",
+        position: { x: 52, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "eastbound",
+        "b",
+    );
+    startJourney(
+        world,
+        navigation,
+        "westbound",
+        "a",
+    );
+
+    for (let i = 0; i < 3; i++) {
+        stepSimulation(
+            world,
+            navigation,
+            0.5,
+        );
+    }
+
+    const east =
+        world.getEntity("eastbound");
+    const west =
+        world.getEntity("westbound");
+
+    assert.ok(east.position.y < 0);
+    assert.ok(west.position.y > 0);
+    assert.ok(
+        Math.abs(east.position.y) <= 1.61,
+    );
+    assert.ok(
+        Math.abs(west.position.y) <= 1.61,
+    );
+});
+
+test("same-direction steering does not ping-pong its lateral side while resolving overlap", () => {
+    const world = new World({
+        localSteering: {
+            neighborRadius: 4,
+            separationStrength: 1.2,
+            maxLateralSpeed: 1,
+            centeringRate: 0.15,
+            congestionStrength: 0,
+        },
+    });
+    const navigation = buildLineNavigation(100);
+
+    world.addEntity({
+        id: "a-walker",
+        position: { x: 20, y: 0 },
+        mobility: { speed: 1 },
+    });
+    world.addEntity({
+        id: "b-walker",
+        position: { x: 20.05, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "a-walker",
+        "b",
+    );
+    startJourney(
+        world,
+        navigation,
+        "b-walker",
+        "b",
+    );
+
+    const signs = [];
+
+    for (let i = 0; i < 12; i++) {
+        stepSimulation(
+            world,
+            navigation,
+            0.25,
+        );
+
+        const y =
+            world.getEntity(
+                "a-walker",
+            ).position.y;
+
+        if (Math.abs(y) > 0.01) {
+            signs.push(Math.sign(y));
+        }
+    }
+
+    assert.ok(signs.length > 2);
+    assert.equal(
+        new Set(signs).size,
+        1,
+    );
+});
+
+test("steering handles mixed body sizes on a narrow road without leaving the corridor", () => {
+    const world = new World({
+        localSteering: {
+            neighborRadius: 5,
+            separationStrength: 2,
+            maxLateralSpeed: 4,
+            centeringRate: 0.1,
+            congestionStrength: 0,
+        },
+    });
+    const navigation = new Navigation();
+
+    navigation.addNode({
+        id: "a",
+        x: 0,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "b",
+        x: 100,
+        y: 0,
+    });
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+        width: 2,
+    });
+
+    world.addEntity({
+        id: "large",
+        position: { x: 20, y: 0 },
+        body: { radius: 0.8 },
+        mobility: { speed: 1 },
+    });
+    world.addEntity({
+        id: "small",
+        position: { x: 20.1, y: 0 },
+        body: { radius: 0.2 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "large",
+        "b",
+    );
+    startJourney(
+        world,
+        navigation,
+        "small",
+        "b",
+    );
+
+    for (let i = 0; i < 10; i++) {
+        stepSimulation(
+            world,
+            navigation,
+            0.25,
+        );
+    }
+
+    assert.ok(
+        Math.abs(
+            world.getEntity("large")
+                .position.y,
+        ) <= 0.150001,
+    );
+    assert.ok(
+        Math.abs(
+            world.getEntity("small")
+                .position.y,
+        ) <= 0.750001,
+    );
+});
+
+test("steering remains finite and corridor-bounded for a dense node launch", () => {
+    const world = new World({
+        localSteering: {
+            neighborRadius: 3,
+            separationStrength: 1,
+            maxLateralSpeed: 1.5,
+            centeringRate: 0.2,
+            congestionStrength: 0.5,
+            minSpeedMultiplier: 0.1,
+        },
+    });
+    const navigation = new Navigation();
+
+    navigation.addNode({
+        id: "a",
+        x: 0,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "b",
+        x: 200,
+        y: 0,
+    });
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+        width: 8,
+    });
+
+    for (let i = 0; i < 40; i++) {
+        const id = `walker-${String(i).padStart(2, "0")}`;
+
+        world.addEntity({
+            id,
+            position: { x: 0, y: 0 },
+            body: {
+                radius:
+                    0.25 +
+                    (i % 4) * 0.05,
+            },
+            mobility: {
+                speed:
+                    1 +
+                    (i % 3) * 0.1,
+            },
+        });
+
+        startJourney(
+            world,
+            navigation,
+            id,
+            "b",
+        );
+    }
+
+    for (let tick = 0; tick < 30; tick++) {
+        stepSimulation(
+            world,
+            navigation,
+            0.2,
+        );
+    }
+
+    for (const entity of world.entities.values()) {
+        assert.ok(
+            Number.isFinite(entity.position.x),
+        );
+        assert.ok(
+            Number.isFinite(entity.position.y),
+        );
+
+        const usable =
+            4 -
+            (entity.body?.radius ?? 0) -
+            world.localSteering.roadEdgeMargin;
+
+        assert.ok(
+            Math.abs(entity.position.y) <=
+                usable + 1e-6,
+        );
+    }
+
+    world.assertInternalConsistency();
+    navigation.assertInternalConsistency();
+});
+
+test("a stationary blocker produces a stable avoidance side", () => {
+    const world = new World({
+        localSteering: {
+            neighborRadius: 4,
+            separationStrength: 1,
+            maxLateralSpeed: 1,
+            centeringRate: 0.1,
+            congestionStrength: 0,
+        },
+    });
+    const navigation = buildLineNavigation(100);
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 20, y: 0 },
+        mobility: { speed: 1 },
+    });
+    world.addEntity({
+        id: "blocker",
+        position: { x: 20.4, y: 0 },
+        body: { radius: 0.5 },
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "walker",
+        "b",
+    );
+
+    const signs = [];
+
+    for (let i = 0; i < 8; i++) {
+        stepSimulation(
+            world,
+            navigation,
+            0.25,
+        );
+
+        const y =
+            world.getEntity(
+                "walker",
+            ).position.y;
+
+        if (Math.abs(y) > 0.01) {
+            signs.push(Math.sign(y));
+        }
+    }
+
+    assert.ok(signs.length > 0);
+    assert.equal(
+        new Set(signs).size,
+        1,
+    );
+});
