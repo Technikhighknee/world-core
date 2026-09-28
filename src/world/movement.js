@@ -28,7 +28,54 @@ function pointIndexIsDone(index, road, reversed) {
         : index >= road.points.length;
 }
 
-function beginJourney(world, navigation, entity, destinationNodeId, planned) {
+function currentJourneyRoadId(entity) {
+    const journey = entity.journey;
+    if (!journey) return null;
+
+    const leg =
+        journey.prefixLeg ??
+        journey.route.legs[journey.legIndex];
+
+    return leg?.roadId ?? null;
+}
+
+function emitRoadLeft(world, entity, roadId, reason = null) {
+    if (!roadId) return;
+
+    world.emitEvent("roadLeft", {
+        entityId: entity.id,
+        roadId,
+        destinationNodeId:
+            entity.journey?.destinationNodeId ?? null,
+        reason,
+    });
+}
+
+function emitRoadEntered(world, entity, roadId) {
+    if (!roadId) return;
+
+    world.emitEvent("roadEntered", {
+        entityId: entity.id,
+        roadId,
+        destinationNodeId:
+            entity.journey?.destinationNodeId ?? null,
+    });
+}
+
+function beginJourney(
+    world,
+    navigation,
+    entity,
+    destinationNodeId,
+    planned,
+    {
+        eventType = "journeyStarted",
+        reason = null,
+    } = {},
+) {
+    const previousRoadId =
+        currentJourneyRoadId(entity);
+
     const route = planned.route;
     const prefixLeg = planned.prefixLeg ?? null;
 
@@ -57,6 +104,44 @@ function beginJourney(world, navigation, entity, destinationNodeId, planned) {
     };
 
     world.markMoving(entity.id);
+
+    world.emitEvent(eventType, {
+        entityId: entity.id,
+        destinationNodeId,
+        reason,
+    });
+
+    const newRoadId =
+        firstLeg?.roadId ?? null;
+
+    if (previousRoadId !== newRoadId) {
+        emitRoadLeft(
+            world,
+            entity,
+            previousRoadId,
+            eventType === "journeyRerouted"
+                ? "rerouted"
+                : null,
+        );
+    }
+
+    if (
+        !planned.entryPoint &&
+        newRoadId &&
+        previousRoadId !== newRoadId
+    ) {
+        emitRoadEntered(
+            world,
+            entity,
+            newRoadId,
+        );
+        entity.journey.roadEntered = true;
+    } else {
+        entity.journey.roadEntered =
+            previousRoadId === newRoadId &&
+            previousRoadId != null;
+    }
+
     return true;
 }
 
@@ -92,6 +177,7 @@ export function startJourney(
         entity,
         destinationNodeId,
         planned,
+        { eventType: "journeyStarted" },
     );
 }
 
@@ -127,10 +213,35 @@ export function rerouteJourney(
         entity,
         destinationNodeId,
         planned,
+        {
+            eventType: "journeyRerouted",
+            reason: "manual",
+        },
     );
 }
 
 export function stopJourney(entity, world = null) {
+    if (!entity.journey) return;
+
+    const roadId =
+        currentJourneyRoadId(entity);
+    const destinationNodeId =
+        entity.journey.destinationNodeId;
+
+    if (world) {
+        emitRoadLeft(
+            world,
+            entity,
+            roadId,
+            "cancelled",
+        );
+
+        world.emitEvent("journeyCancelled", {
+            entityId: entity.id,
+            destinationNodeId,
+        });
+    }
+
     entity.journey = null;
     world?.unmarkMoving(entity.id);
 }
@@ -218,13 +329,36 @@ export function updateMovement(world, navigation, deltaSeconds) {
 }
 
 function finishJourney(world, entity) {
+    const destinationNodeId =
+        entity.journey?.destinationNodeId ?? null;
+
     entity.journey = null;
     world.unmarkMoving(entity.id);
+
+    world.emitEvent("journeyCompleted", {
+        entityId: entity.id,
+        destinationNodeId,
+    });
 }
 
 function invalidateJourney(world, entity, reason) {
     const destinationNodeId =
         entity.journey?.destinationNodeId ?? null;
+    const roadId =
+        currentJourneyRoadId(entity);
+
+    emitRoadLeft(
+        world,
+        entity,
+        roadId,
+        reason,
+    );
+
+    world.emitEvent("journeyFailed", {
+        entityId: entity.id,
+        destinationNodeId,
+        reason,
+    });
 
     entity.journey = null;
     entity.lastJourneyFailure = {
@@ -279,54 +413,91 @@ function replanInvalidJourney(
         entity,
         destinationNodeId,
         planned,
+        {
+            eventType: "journeyRerouted",
+            reason: "graph-invalidated",
+        },
     );
 
     return true;
 }
 
 function advanceLeg(world, navigation, entity, journey) {
+    const currentLeg =
+        journey.prefixLeg ??
+        journey.route.legs[journey.legIndex];
+
+    emitRoadLeft(
+        world,
+        entity,
+        currentLeg?.roadId ?? null,
+    );
+
     if (journey.prefixLeg) {
         journey.prefixLeg = null;
 
-        const firstRouteLeg = journey.route.legs[journey.legIndex];
+        const firstRouteLeg =
+            journey.route.legs[journey.legIndex];
 
         if (!firstRouteLeg) {
             finishJourney(world, entity);
             return false;
         }
 
-        const firstRouteRoad = navigation.roads.get(firstRouteLeg.roadId);
+        const firstRouteRoad =
+            navigation.roads.get(
+                firstRouteLeg.roadId,
+            );
 
         if (!firstRouteRoad) {
             finishJourney(world, entity);
             return false;
         }
 
-        journey.pointIndex = initialPointIndex(
-            firstRouteRoad,
-            firstRouteLeg,
+        journey.pointIndex =
+            initialPointIndex(
+                firstRouteRoad,
+                firstRouteLeg,
+            );
+
+        emitRoadEntered(
+            world,
+            entity,
+            firstRouteLeg.roadId,
         );
+        journey.roadEntered = true;
 
         return true;
     }
 
     journey.legIndex++;
 
-    const nextLeg = journey.route.legs[journey.legIndex];
+    const nextLeg =
+        journey.route.legs[journey.legIndex];
 
     if (!nextLeg) {
         finishJourney(world, entity);
         return false;
     }
 
-    const nextRoad = navigation.roads.get(nextLeg.roadId);
+    const nextRoad =
+        navigation.roads.get(nextLeg.roadId);
 
     if (!nextRoad) {
         finishJourney(world, entity);
         return false;
     }
 
-    journey.pointIndex = initialPointIndex(nextRoad, nextLeg);
+    journey.pointIndex =
+        initialPointIndex(nextRoad, nextLeg);
+
+    emitRoadEntered(
+        world,
+        entity,
+        nextLeg.roadId,
+    );
+    journey.roadEntered = true;
+
     return true;
 }
 
@@ -350,6 +521,16 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
                 x = targetX;
                 y = targetY;
                 journey.entryPoint = null;
+
+                if (!journey.roadEntered) {
+                    emitRoadEntered(
+                        world,
+                        entity,
+                        currentJourneyRoadId(entity),
+                    );
+                    journey.roadEntered = true;
+                }
+
                 continue;
             }
 
@@ -363,6 +544,16 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
                 remainingTime -= secondsToTarget;
                 moved = true;
                 journey.entryPoint = null;
+
+                if (!journey.roadEntered) {
+                    emitRoadEntered(
+                        world,
+                        entity,
+                        currentJourneyRoadId(entity),
+                    );
+                    journey.roadEntered = true;
+                }
+
                 continue;
             }
 
@@ -477,6 +668,22 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
                 journey.pointIndex,
                 leg.reversed,
             );
+
+            if (
+                pointIndexIsDone(
+                    journey.pointIndex,
+                    road,
+                    leg.reversed,
+                )
+            ) {
+                advanceLeg(
+                    world,
+                    navigation,
+                    entity,
+                    journey,
+                );
+            }
+
             continue;
         }
 

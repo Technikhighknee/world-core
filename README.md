@@ -97,3 +97,18 @@ const world = new World({
 ```
 
 When enabled, moving entities query their local neighborhood, derive a lateral separation correction from body radii, clamp that correction to the usable road width, and derive a speed multiplier from local occupancy and forward pressure. Individual mobility definitions can opt out with `localSteering: false`.
+
+
+## Movement events
+
+Event capture is opt-in so the default high-volume movement path does not allocate event objects.
+
+```js
+const world = new World({ captureEvents: true });
+
+// ... simulate ...
+
+const events = world.drainEvents();
+```
+
+Movement emits deterministic lifecycle events for journey start, reroute, cancellation, completion and failure, plus road entry/exit transitions. `drainEvents(target)` can reuse a caller-owned array.

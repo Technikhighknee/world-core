@@ -11,9 +11,13 @@ export class World {
         movementLodTiers = null,
         interestPoints = [],
         localSteering = null,
+        captureEvents = false,
     } = {}) {
         this.time = 0;
         this.entities = new Map();
+
+        this.captureEvents = Boolean(captureEvents);
+        this.events = [];
 
         this.spatial = new SpatialHash(spatialCellSize);
         this.radiusCounts = new Map();
@@ -130,6 +134,42 @@ export class World {
 
         bucket.add(entity);
         this.entityMovementIntervals.set(entityId, interval);
+    }
+
+    setEventCapture(enabled) {
+        this.captureEvents = Boolean(enabled);
+
+        if (!this.captureEvents) {
+            this.events.length = 0;
+        }
+    }
+
+    emitEvent(type, data = {}) {
+        if (!this.captureEvents) return null;
+
+        const event = {
+            time: this.time,
+            type,
+            ...data,
+        };
+
+        this.events.push(event);
+        return event;
+    }
+
+    drainEvents(target = []) {
+        target.length = 0;
+
+        for (const event of this.events) {
+            target.push(event);
+        }
+
+        this.events.length = 0;
+        return target;
+    }
+
+    peekEvents() {
+        return this.events;
     }
 
     addEntity(entity) {
