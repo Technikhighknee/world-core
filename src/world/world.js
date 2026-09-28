@@ -10,6 +10,7 @@ export class World {
         spatialCellSize = 20,
         movementLodTiers = null,
         interestPoints = [],
+        localSteering = null,
     } = {}) {
         this.time = 0;
         this.entities = new Map();
@@ -26,6 +27,16 @@ export class World {
 
         this.movementLodTiers = null;
         this.interestPoints = [];
+
+        this.localSteering = null;
+        this.localSteeringQueryBuffer =
+            this.createSpatialQueryBuffer();
+
+        if (localSteering) {
+            this.configureLocalSteering(
+                localSteering,
+            );
+        }
 
         if (movementLodTiers) {
             this.configureMovementLod(movementLodTiers);
@@ -212,6 +223,77 @@ export class World {
 
         this.#untrackRadius(previous);
         this.#trackRadius(radius);
+    }
+
+    configureLocalSteering(options = {}) {
+        const enabled =
+            options.enabled ?? true;
+
+        const config = {
+            enabled: Boolean(enabled),
+            neighborRadius:
+                options.neighborRadius ?? 2.5,
+            separationGap:
+                options.separationGap ?? 0.1,
+            separationStrength:
+                options.separationStrength ?? 0.75,
+            maxLateralSpeed:
+                options.maxLateralSpeed ?? 0.8,
+            roadEdgeMargin:
+                options.roadEdgeMargin ?? 0.05,
+            congestionThreshold:
+                options.congestionThreshold ?? 1,
+            congestionStrength:
+                options.congestionStrength ?? 0.65,
+            forwardPressureWeight:
+                options.forwardPressureWeight ?? 0.35,
+            minSpeedMultiplier:
+                options.minSpeedMultiplier ?? 0.2,
+        };
+
+        if (!(config.neighborRadius > 0)) {
+            throw new Error(
+                "localSteering.neighborRadius must be greater than 0",
+            );
+        }
+
+        if (!(config.separationGap >= 0)) {
+            throw new Error(
+                "localSteering.separationGap must be greater than or equal to 0",
+            );
+        }
+
+        if (!(config.maxLateralSpeed >= 0)) {
+            throw new Error(
+                "localSteering.maxLateralSpeed must be greater than or equal to 0",
+            );
+        }
+
+        if (
+            !(
+                config.minSpeedMultiplier >
+                0 &&
+                config.minSpeedMultiplier <= 1
+            )
+        ) {
+            throw new Error(
+                "localSteering.minSpeedMultiplier must be in (0, 1]",
+            );
+        }
+
+        this.localSteering = config;
+        return config;
+    }
+
+    disableLocalSteering() {
+        if (!this.localSteering) {
+            this.localSteering = {
+                enabled: false,
+            };
+            return;
+        }
+
+        this.localSteering.enabled = false;
     }
 
     configureMovementLod(tiers) {
