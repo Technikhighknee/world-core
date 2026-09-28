@@ -56,6 +56,14 @@ jobs:
           STEERING_DELTA_SECONDS: 0.1
         run: npm run bench:steering
 
+      - name: Determinism soak smoke
+        env:
+          DETERMINISM_TICKS: 80
+          DETERMINISM_ENTITIES: 30
+          DETERMINISM_HASH_EVERY: 10
+          DETERMINISM_SAVE_TICK: 40
+        run: npm run bench:determinism
+
       - name: Retention benchmark smoke
         env:
           CHURN_CITIES: 2
