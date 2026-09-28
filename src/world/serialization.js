@@ -8,7 +8,7 @@ import {
 } from "./snapshot-validation.js";
 
 const FORMAT = "world-core";
-const FORMAT_VERSION = 2;
+const FORMAT_VERSION = 3;
 
 function clone(value) {
     return value == null
@@ -64,6 +64,13 @@ function deserializeMobility(serialized) {
 }
 
 function serializeNavigation(navigation) {
+    const regions = [...navigation.regions.values()]
+        .sort((a, b) =>
+            a.id.localeCompare(b.id))
+        .map(region => ({
+            id: region.id,
+        }));
+
     const nodes = [...navigation.nodes.values()]
         .sort((a, b) =>
             a.id.localeCompare(b.id))
@@ -73,6 +80,8 @@ function serializeNavigation(navigation) {
             y: node.position.y,
             junctionRadius:
                 node.junctionRadius ?? 0,
+            regionId:
+                node.regionId ?? null,
         }));
 
     const roads = [...navigation.roads.values()]
@@ -128,6 +137,11 @@ function serializeNavigation(navigation) {
             navigation.routeCacheMaxLegs,
         routeCacheMaxTotalLegs:
             navigation.routeCacheMaxTotalLegs,
+        hierarchicalRouteCacheSize:
+            navigation.hierarchicalRouteCacheSize,
+        regionalRouteCacheSize:
+            navigation.regionalRouteCacheSize,
+        regions,
         nodes,
         roads,
     };
@@ -143,7 +157,15 @@ function deserializeNavigation(data) {
             data.routeCacheMaxLegs,
         routeCacheMaxTotalLegs:
             data.routeCacheMaxTotalLegs,
+        hierarchicalRouteCacheSize:
+            data.hierarchicalRouteCacheSize,
+        regionalRouteCacheSize:
+            data.regionalRouteCacheSize,
     });
+
+    for (const region of data.regions ?? []) {
+        navigation.addRegion(region);
+    }
 
     for (const node of data.nodes) {
         navigation.addNode(node);
@@ -476,6 +498,13 @@ export function serializeWorldCore(
                 serializeObstacles(world),
             movementLodTiers:
                 serializeLodTiers(world),
+            simulationRegions:
+                [...world.simulationRegions.values()]
+                    .sort((a, b) =>
+                        a.id.localeCompare(b.id))
+                    .map(region => ({
+                        ...region,
+                    })),
             interestPoints:
                 clone(world.interestPoints),
             localSteering:
@@ -528,6 +557,8 @@ export function deserializeWorldCore(
             snapshot.world.obstacleCellSize,
         movementLodTiers:
             snapshot.world.movementLodTiers,
+        simulationRegions:
+            snapshot.world.simulationRegions ?? [],
         interestPoints:
             snapshot.world.interestPoints,
         localSteering:
