@@ -981,46 +981,116 @@ export class Navigation {
         return best;
     }
 
-    findRouteFromPosition(
+    findNavigationEntries(
         position,
-        destinationNodeId,
         mobility,
         {
-            nodeTolerance = 0.1,
-            roadTolerance = 0,
+            maxDistance = 0,
+            maxEntries = 16,
         } = {},
     ) {
-        const node = this.nodeAt(
-            position,
-            nodeTolerance,
-        );
-
-        if (node) {
-            const route = this.findRoute(
-                node.id,
-                destinationNodeId,
-                mobility,
+        if (!(maxDistance >= 0)) {
+            throw new Error(
+                "maxDistance must be greater than or equal to 0",
             );
-
-            if (!route) return null;
-
-            return {
-                route,
-                prefixLeg: null,
-                entryPoint: null,
-                estimatedSeconds:
-                    route.estimatedSeconds,
-            };
         }
 
-        const hit = this.roadAt(
-            position,
-            roadTolerance,
-            { includeDisabled: false },
-        );
+        if (!(maxEntries > 0)) return [];
 
-        if (!hit) return null;
+        const candidates = [];
 
+        const nodeIds =
+            this.nodeIndex.queryRadiusInto(
+                this.nodeQueryScratch,
+                position,
+                maxDistance,
+            );
+
+        for (const nodeId of nodeIds) {
+            const node = this.nodes.get(nodeId);
+            if (!node) continue;
+
+            const d = distance(
+                position,
+                node.position,
+            );
+
+            if (d > maxDistance) continue;
+
+            candidates.push({
+                kind: "node",
+                id: node.id,
+                node,
+                point: node.position,
+                distance: d,
+            });
+        }
+
+        const roadIds =
+            this.roadIndex.queryRadiusInto(
+                this.roadQueryScratch,
+                position,
+                maxDistance +
+                    this.maxRoadHalfWidth,
+            );
+
+        for (const roadId of roadIds) {
+            const road = this.roads.get(roadId);
+
+            if (
+                !road ||
+                !this.canTraverseRoad(
+                    road,
+                    mobility,
+                )
+            ) {
+                continue;
+            }
+
+            const closest =
+                closestPointOnPolyline(
+                    position,
+                    road.points,
+                );
+
+            if (!closest) continue;
+            if (closest.distance > maxDistance) {
+                continue;
+            }
+
+            candidates.push({
+                kind: "road",
+                id: road.id,
+                road,
+                ...closest,
+            });
+        }
+
+        candidates.sort((a, b) => {
+            if (a.distance !== b.distance) {
+                return a.distance - b.distance;
+            }
+
+            if (a.kind !== b.kind) {
+                return a.kind === "node" ? -1 : 1;
+            }
+
+            return a.id.localeCompare(b.id);
+        });
+
+        if (candidates.length > maxEntries) {
+            candidates.length = maxEntries;
+        }
+
+        return candidates;
+    }
+
+    #planFromRoadHit(
+        position,
+        hit,
+        destinationNodeId,
+        mobility,
+    ) {
         const road = hit.road;
 
         if (!this.canTraverseRoad(road, mobility)) {
@@ -1074,11 +1144,14 @@ export class Navigation {
                 route: baseRoute,
                 prefixLeg,
                 entryPoint:
-                    distance(position, hit.point) >
-                    EPSILON
+                    distance(
+                        position,
+                        hit.point,
+                    ) > EPSILON
                         ? { ...hit.point }
                         : null,
-                estimatedSeconds: totalSeconds,
+                estimatedSeconds:
+                    totalSeconds,
             };
 
             if (
@@ -1102,6 +1175,133 @@ export class Navigation {
                 true,
                 hit.distanceAlong,
             );
+        }
+
+        return best;
+    }
+
+    findRouteFromPosition(
+        position,
+        destinationNodeId,
+        mobility,
+        {
+            nodeTolerance = 0.1,
+            roadTolerance = 0,
+            entryMaxDistance = 0,
+            maxEntryCandidates = 16,
+        } = {},
+    ) {
+        const node = this.nodeAt(
+            position,
+            nodeTolerance,
+        );
+
+        if (node) {
+            const route = this.findRoute(
+                node.id,
+                destinationNodeId,
+                mobility,
+            );
+
+            if (route) {
+                return {
+                    route,
+                    prefixLeg: null,
+                    entryPoint: null,
+                    estimatedSeconds:
+                        route.estimatedSeconds,
+                };
+            }
+        }
+
+        const hit = this.roadAt(
+            position,
+            roadTolerance,
+            { includeDisabled: false },
+        );
+
+        if (
+            hit &&
+            this.canTraverseRoad(
+                hit.road,
+                mobility,
+            )
+        ) {
+            const planned =
+                this.#planFromRoadHit(
+                    position,
+                    hit,
+                    destinationNodeId,
+                    mobility,
+                );
+
+            if (planned) return planned;
+        }
+
+        if (!(entryMaxDistance > 0)) {
+            return null;
+        }
+
+        const entries =
+            this.findNavigationEntries(
+                position,
+                mobility,
+                {
+                    maxDistance:
+                        entryMaxDistance,
+                    maxEntries:
+                        maxEntryCandidates,
+                },
+            );
+
+        let best = null;
+
+        for (const entry of entries) {
+            let candidate = null;
+
+            if (entry.kind === "node") {
+                const route = this.findRoute(
+                    entry.node.id,
+                    destinationNodeId,
+                    mobility,
+                );
+
+                if (!route) continue;
+
+                candidate = {
+                    route,
+                    prefixLeg: null,
+                    entryPoint:
+                        entry.distance > EPSILON
+                            ? {
+                                ...entry.node.position,
+                            }
+                            : null,
+                    estimatedSeconds:
+                        entry.distance /
+                            mobility.speed +
+                        route.estimatedSeconds,
+                };
+            } else {
+                candidate =
+                    this.#planFromRoadHit(
+                        position,
+                        entry,
+                        destinationNodeId,
+                        mobility,
+                    );
+            }
+
+            if (
+                candidate &&
+                (
+                    !best ||
+                    candidate.estimatedSeconds <
+                        best.estimatedSeconds
+                )
+            ) {
+                best = candidate;
+            }
         }
 
         return best;
