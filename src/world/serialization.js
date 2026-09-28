@@ -299,6 +299,10 @@ function serializeEntities(world) {
     return {
         entities,
         routes,
+        entityOrder:
+            [...world.entities.keys()],
+        movingOrder:
+            [...world.movingEntities.keys()],
     };
 }
 
@@ -323,9 +327,39 @@ function deserializeEntities(
         });
     }
 
-    const pendingJourneys = [];
+    const serializedById =
+        new Map(
+            data.entities.map(
+                serialized => [
+                    serialized.entity.id,
+                    serialized,
+                ],
+            ),
+        );
 
-    for (const serialized of data.entities) {
+    const entityOrder =
+        data.entityOrder?.length
+            ? data.entityOrder
+            : data.entities.map(
+                serialized =>
+                    serialized.entity.id,
+            );
+
+    const pendingJourneys =
+        new Map();
+
+    for (const entityId of entityOrder) {
+        const serialized =
+            serializedById.get(
+                entityId,
+            );
+
+        if (!serialized) {
+            throw new Error(
+                `Entity order references missing entity: ${entityId}`,
+            );
+        }
+
         const entity = {
             ...clone(serialized.entity),
         };
@@ -343,44 +377,75 @@ function deserializeEntities(
             world.addEntity(entity);
 
         if (serialized.journey) {
-            pendingJourneys.push({
+            const route =
+                routes.get(
+                    serialized.journey
+                        .routeId,
+                );
+
+            if (!route) {
+                throw new Error(
+                    `Missing serialized route ${serialized.journey.routeId}`,
+                );
+            }
+
+            const {
+                routeId,
+                ...journeyRest
+            } =
+                serialized.journey;
+
+            stored.journey = {
+                ...clone(journeyRest),
+                route,
+                validatedGraphRevision:
+                    navigation.graphRevision,
+            };
+
+            pendingJourneys.set(
+                stored.id,
                 stored,
-                serializedJourney:
-                    serialized.journey,
-            });
+            );
         }
     }
 
-    for (
-        const {
-            stored,
-            serializedJourney,
-        } of pendingJourneys
+    if (
+        world.entities.size !==
+        data.entities.length
     ) {
-        const route =
-            routes.get(
-                serializedJourney.routeId,
+        throw new Error(
+            "Serialized entity order does not cover every entity",
+        );
+    }
+
+    const movingOrder =
+        data.movingOrder?.length
+            ? data.movingOrder
+            : [...pendingJourneys.keys()];
+
+    for (const entityId of movingOrder) {
+        const stored =
+            pendingJourneys.get(
+                entityId,
             );
 
-        if (!route) {
+        if (!stored) {
             throw new Error(
-                `Missing serialized route ${serializedJourney.routeId}`,
+                `Moving order references entity without journey: ${entityId}`,
             );
         }
 
-        const {
-            routeId,
-            ...journeyRest
-        } = serializedJourney;
+        world.markMoving(entityId);
+        pendingJourneys.delete(
+            entityId,
+        );
+    }
 
-        stored.journey = {
-            ...clone(journeyRest),
-            route,
-            validatedGraphRevision:
-                navigation.graphRevision,
-        };
-
-        world.markMoving(stored.id);
+    for (
+        const entityId of
+        pendingJourneys.keys()
+    ) {
+        world.markMoving(entityId);
     }
 }
 
@@ -424,6 +489,10 @@ export function serializeWorldCore(
 
         routes: entityData.routes,
         entities: entityData.entities,
+        entityOrder:
+            entityData.entityOrder,
+        movingOrder:
+            entityData.movingOrder,
     };
 }
 
@@ -473,6 +542,10 @@ export function deserializeWorldCore(
         {
             routes: snapshot.routes,
             entities: snapshot.entities,
+            entityOrder:
+                snapshot.entityOrder,
+            movingOrder:
+                snapshot.movingOrder,
         },
     );
 
