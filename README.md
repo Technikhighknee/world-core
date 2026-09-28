@@ -2,6 +2,24 @@
 
 A rendering-independent 2D world, navigation and movement simulation core.
 
+## Public API
+
+```js
+import {
+  World,
+  Navigation,
+  mobilityProfile,
+  startJourney,
+  rerouteJourney,
+  stopJourney,
+  stepSimulation,
+  serializeWorldCore,
+  deserializeWorldCore
+} from "world-core";
+```
+
+The package root intentionally exposes the simulation-level API only. Spatial hash implementations, the static navigation index, priority queue and geometry helpers remain internal implementation details.
+
 The world stores actual entity coordinates. Navigation is a separate graph used to plan routes; movement advances entities through world space and keeps the dynamic spatial index synchronized.
 
 ## Scalability model
