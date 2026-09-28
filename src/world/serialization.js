@@ -3,6 +3,9 @@ import {
 } from "./mobility-profiles.js";
 import { Navigation } from "./navigation.js";
 import { World } from "./world.js";
+import {
+    validateWorldCoreSnapshot,
+} from "./snapshot-validation.js";
 
 const FORMAT = "world-core";
 const FORMAT_VERSION = 2;
@@ -499,15 +502,15 @@ export function serializeWorldCore(
 export function deserializeWorldCore(
     snapshot,
 ) {
-    if (
-        snapshot?.format !== FORMAT ||
-        snapshot?.version !==
-            FORMAT_VERSION
-    ) {
-        throw new Error(
-            "Unsupported world-core snapshot format or version",
-        );
-    }
+    validateWorldCoreSnapshot(
+        snapshot,
+        {
+            expectedFormat:
+                FORMAT,
+            expectedVersion:
+                FORMAT_VERSION,
+        },
+    );
 
     const navigation =
         deserializeNavigation(
