@@ -97,6 +97,7 @@ export class Navigation {
         this.nodes = new Map();
         this.roads = new Map();
         this.adjacency = new Map();
+        this.roadEffects = new Map();
 
         this.nodeIndex = new StaticSpatialIndex(spatialCellSize);
         this.roadIndex = new StaticSpatialIndex(spatialCellSize);
@@ -371,6 +372,7 @@ export class Navigation {
         removeFromAdjacency(road.to);
 
         this.roadIndex.remove(roadId);
+        this.roadEffects.delete(roadId);
         this.roads.delete(roadId);
 
         return road;
@@ -416,10 +418,21 @@ export class Navigation {
         this.routeCacheLegCount = 0;
     }
 
-    addNode({ id, x, y }) {
+    addNode({
+        id,
+        x,
+        y,
+        junctionRadius = 0,
+    }) {
         if (this.nodes.has(id)) {
             throw new Error(
                 `Navigation node already exists: ${id}`,
+            );
+        }
+
+        if (!(junctionRadius >= 0)) {
+            throw new Error(
+                "Navigation node junctionRadius must be greater than or equal to 0",
             );
         }
 
@@ -427,6 +440,7 @@ export class Navigation {
         const node = {
             id,
             position: { x, y },
+            junctionRadius,
             componentId,
         };
 
@@ -440,6 +454,39 @@ export class Navigation {
         this.#touchGraph();
 
         return node;
+    }
+
+    setNodeJunctionRadius(
+        nodeId,
+        junctionRadius,
+    ) {
+        if (!(junctionRadius >= 0)) {
+            throw new Error(
+                "Navigation node junctionRadius must be greater than or equal to 0",
+            );
+        }
+
+        const node =
+            this.nodes.get(nodeId);
+
+        if (!node) {
+            throw new Error(
+                `Unknown node: ${nodeId}`,
+            );
+        }
+
+        if (
+            node.junctionRadius ===
+            junctionRadius
+        ) {
+            return false;
+        }
+
+        node.junctionRadius =
+            junctionRadius;
+        this.#touchGraph();
+
+        return true;
     }
 
     removeNode(nodeId) {
@@ -802,6 +849,185 @@ export class Navigation {
         return road;
     }
 
+    setRoadEffect(
+        effectId,
+        roadId,
+        {
+            blocked = false,
+            costMultiplier = 1,
+        } = {},
+    ) {
+        if (!effectId) {
+            throw new Error(
+                "Road effect id is required",
+            );
+        }
+
+        if (
+            !Number.isFinite(
+                costMultiplier,
+            ) ||
+            costMultiplier < 1
+        ) {
+            throw new Error(
+                "Road effect costMultiplier must be finite and greater than or equal to 1",
+            );
+        }
+
+        const road =
+            this.roads.get(roadId);
+
+        if (!road) {
+            throw new Error(
+                `Unknown road: ${roadId}`,
+            );
+        }
+
+        let effects =
+            this.roadEffects.get(
+                roadId,
+            );
+
+        if (!effects) {
+            effects = new Map();
+            this.roadEffects.set(
+                roadId,
+                effects,
+            );
+        }
+
+        const next = {
+            blocked: Boolean(blocked),
+            costMultiplier,
+        };
+        const previous =
+            effects.get(effectId);
+
+        if (
+            previous &&
+            previous.blocked ===
+                next.blocked &&
+            previous.costMultiplier ===
+                next.costMultiplier
+        ) {
+            return false;
+        }
+
+        this.#invalidateComponentsForNodes([
+            road.from,
+            road.to,
+        ]);
+
+        effects.set(
+            effectId,
+            next,
+        );
+        road.version++;
+        this.#touchGraph();
+
+        return true;
+    }
+
+    removeRoadEffect(
+        effectId,
+        roadId,
+    ) {
+        const road =
+            this.roads.get(roadId);
+
+        if (!road) {
+            throw new Error(
+                `Unknown road: ${roadId}`,
+            );
+        }
+
+        const effects =
+            this.roadEffects.get(
+                roadId,
+            );
+
+        if (
+            !effects ||
+            !effects.has(effectId)
+        ) {
+            return false;
+        }
+
+        this.#invalidateComponentsForNodes([
+            road.from,
+            road.to,
+        ]);
+
+        effects.delete(effectId);
+
+        if (effects.size === 0) {
+            this.roadEffects.delete(
+                roadId,
+            );
+        }
+
+        road.version++;
+        this.#touchGraph();
+
+        return true;
+    }
+
+    clearRoadEffect(effectId) {
+        let changed = false;
+
+        for (
+            const roadId of
+            [...this.roadEffects.keys()]
+        ) {
+            if (
+                this.roadEffects
+                    .get(roadId)
+                    ?.has(effectId)
+            ) {
+                this.removeRoadEffect(
+                    effectId,
+                    roadId,
+                );
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    roadCostMultiplier(
+        roadOrId,
+    ) {
+        const road =
+            typeof roadOrId === "string"
+                ? this.roads.get(
+                    roadOrId,
+                )
+                : roadOrId;
+
+        if (!road) return Infinity;
+
+        const effects =
+            this.roadEffects.get(
+                road.id,
+            );
+
+        if (!effects) return 1;
+
+        let multiplier = 1;
+
+        for (const effect of effects.values()) {
+            if (effect.blocked) {
+                return Infinity;
+            }
+
+            multiplier *=
+                effect.costMultiplier;
+        }
+
+        return multiplier;
+    }
+
     canTraverseRoad(roadOrId, mobility) {
         const road =
             typeof roadOrId === "string"
@@ -809,6 +1035,15 @@ export class Navigation {
                 : roadOrId;
 
         if (!road || !road.enabled) return false;
+        if (
+            !Number.isFinite(
+                this.roadCostMultiplier(
+                    road,
+                ),
+            )
+        ) {
+            return false;
+        }
         if (!(mobility?.speed > 0)) return false;
         if (!profileAllowed(road, mobility)) return false;
         if (!tagsAllowed(road, mobility)) return false;
@@ -1178,7 +1413,11 @@ export class Navigation {
             if (!baseRoute) return;
 
             const partialSeconds =
-                partialDistance / speed;
+                partialDistance /
+                speed *
+                this.roadCostMultiplier(
+                    road,
+                );
 
             const totalSeconds =
                 entrySeconds +
@@ -1373,6 +1612,15 @@ export class Navigation {
         return {
             nodeCount: this.nodes.size,
             roadCount: this.roads.size,
+            roadEffectRoadCount:
+                this.roadEffects.size,
+            roadEffectCount:
+                [...this.roadEffects.values()]
+                    .reduce(
+                        (sum, effects) =>
+                            sum + effects.size,
+                        0,
+                    ),
             adjacencyNodeCount: this.adjacency.size,
             adjacencyEdgeCount: adjacencyEdges,
             componentCount: this.componentMembers.size,
@@ -1437,6 +1685,12 @@ export class Navigation {
         let expectedAdjacencyEdges = 0;
 
         for (const [nodeId, node] of this.nodes) {
+            if (!(node.junctionRadius >= 0)) {
+                throw new Error(
+                    `Node has invalid junction radius: ${nodeId}`,
+                );
+            }
+
             if (!this.adjacency.has(nodeId)) {
                 throw new Error(
                     `Node missing adjacency list: ${nodeId}`,
@@ -1766,6 +2020,39 @@ export class Navigation {
             );
         }
 
+        for (
+            const [roadId, effects] of
+            this.roadEffects
+        ) {
+            if (!this.roads.has(roadId)) {
+                throw new Error(
+                    `Road effects reference missing road: ${roadId}`,
+                );
+            }
+
+            for (
+                const [effectId, effect] of
+                effects
+            ) {
+                if (!effectId) {
+                    throw new Error(
+                        `Road effect has empty id on road: ${roadId}`,
+                    );
+                }
+
+                if (
+                    !Number.isFinite(
+                        effect.costMultiplier,
+                    ) ||
+                    effect.costMultiplier < 1
+                ) {
+                    throw new Error(
+                        `Road effect has invalid cost multiplier: ${effectId}`,
+                    );
+                }
+            }
+        }
+
         let cachedLegs = 0;
 
         for (const [key, entry] of this.routeCache) {
@@ -1980,7 +2267,11 @@ export class Navigation {
 
                 const nextCost =
                     currentCost +
-                    road.length / speed;
+                    road.length /
+                        speed *
+                        this.roadCostMultiplier(
+                            road,
+                        );
 
                 const knownCost =
                     costs.get(edge.to) ?? Infinity;

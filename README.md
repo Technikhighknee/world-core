@@ -151,3 +151,50 @@ STEERING_COUNTS=100,500,1000,5000 npm run bench:steering
 ```
 
 The benchmark reports p50/p95/p99/max tick latency, steering-to-baseline cost ratio, post-GC memory deltas, finite-position checks and road-corridor violations.
+
+
+## Junctions and obstacles
+
+Navigation nodes can define a `junctionRadius`. Intermediate journey legs may transition to the next road anywhere inside that junction area instead of forcing every mover through the exact mathematical node center.
+
+```js
+navigation.addNode({
+  id: "market-crossing",
+  x: 100,
+  y: 50,
+  junctionRadius: 3
+});
+```
+
+The world also owns an indexed obstacle field for spatial steering obstacles. Circle, AABB and capsule-like segment obstacles are supported and may be enabled, disabled, replaced or removed without rebuilding the entity spatial hash.
+
+```js
+world.addObstacle({
+  id: "market-stall",
+  type: "aabb",
+  minX: 20,
+  minY: 10,
+  maxX: 24,
+  maxY: 14
+});
+```
+
+Local steering considers enabled obstacles inside its configured lookahead and avoids them while respecting the usable road corridor.
+
+Temporary routing effects are separate from obstacle geometry. They let a consumer block or penalize a road without deleting or permanently disabling it:
+
+```js
+navigation.setRoadEffect(
+  "closed-gate",
+  "north-gate-road",
+  { blocked: true }
+);
+
+navigation.setRoadEffect(
+  "market-crowd",
+  "market-road",
+  { costMultiplier: 2.5 }
+);
+```
+
+Road effects invalidate cached/current routes through road versioning, so active journeys automatically replan when the temporary state changes. Junction radii, obstacles and road effects are included in snapshot format version 2.
