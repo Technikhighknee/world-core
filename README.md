@@ -197,7 +197,7 @@ navigation.setRoadEffect(
 );
 ```
 
-Road effects invalidate cached/current routes through road versioning, so active journeys automatically replan when the temporary state changes. Junction radii, obstacles and road effects are included in snapshot format version 2.
+Road effects invalidate cached/current routes through road versioning, so active journeys automatically replan when the temporary state changes. Junction radii, obstacles and road effects are included in the current internal snapshot format.
 
 
 ## Fuzzing, determinism and state hashes
