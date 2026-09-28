@@ -64,6 +64,14 @@ jobs:
           DETERMINISM_SAVE_TICK: 40
         run: npm run bench:determinism
 
+      - name: Snapshot benchmark smoke
+        env:
+          SNAPSHOT_CITIES: 2
+          SNAPSHOT_GRID_SIZE: 6
+          SNAPSHOT_ENTITIES: 200
+          SNAPSHOT_MOVERS: 80
+        run: npm run bench:snapshot
+
       - name: Retention benchmark smoke
         env:
           CHURN_CITIES: 2

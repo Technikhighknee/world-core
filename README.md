@@ -220,3 +220,14 @@ import {
 ```
 
 State hashes are canonicalized so object key order and route object-sharing details do not create false mismatches. Entity and active-mover execution order are included because they can affect future simulation behavior.
+
+
+## Snapshot validation and performance
+
+`validateWorldCoreSnapshot(snapshot)` validates a versioned save before restore mutates any reconstructed world state. It checks graph/entity/route references, route continuity, execution order, active journeys, obstacle geometry, road effects, LOD state, coordinates, radii and other numeric bounds.
+
+```bash
+npm run bench:snapshot
+```
+
+The default snapshot benchmark builds 50,000 entities with 20,000 active journeys and reports separate timings for snapshot creation, JSON encoding, JSON parsing, validation, restore and state-hash verification. It also reports JSON size and post-GC retained-memory deltas for each phase.

@@ -26,3 +26,7 @@ export {
     computeWorldCoreStateHash,
     computeWorldCoreStateHashes,
 } from "./world/state-hash.js";
+
+export {
+    validateWorldCoreSnapshot,
+} from "./world/snapshot-validation.js";

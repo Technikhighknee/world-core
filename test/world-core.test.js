@@ -2017,7 +2017,7 @@ test("unsupported snapshot versions are rejected", () => {
                 format: "world-core",
                 version: 999,
             }),
-        /Unsupported world-core snapshot/,
+        /Invalid world-core snapshot at \$\.version/,
     );
 });
 
@@ -2041,6 +2041,7 @@ test("package self-reference exposes only the intended public API", async () => 
             "startJourney",
             "stepSimulation",
             "stopJourney",
+            "validateWorldCoreSnapshot",
         ].sort(),
     );
 
