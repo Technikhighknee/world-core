@@ -11,7 +11,8 @@
     "bench:soak": "node --expose-gc benchmark/soak.js",
     "bench:profile": "node benchmark/profile-movement.js",
     "bench:retention": "node --expose-gc benchmark/retention-soak.js",
-    "bench:steering": "node --expose-gc benchmark/steering.js"
+    "bench:steering": "node --expose-gc benchmark/steering.js",
+    "bench:determinism": "node benchmark/determinism-soak.js"
   },
   "keywords": [
     "simulation",

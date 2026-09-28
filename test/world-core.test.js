@@ -2029,6 +2029,8 @@ test("package self-reference exposes only the intended public API", async () => 
             "Navigation",
             "WORLD_CORE_SNAPSHOT_VERSION",
             "World",
+            "computeWorldCoreStateHash",
+            "computeWorldCoreStateHashes",
             "deserializeWorldCore",
             "mobilityProfile",
             "rerouteJourney",

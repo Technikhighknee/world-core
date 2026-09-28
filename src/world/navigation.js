@@ -87,6 +87,17 @@ function tagsAllowed(road, mobility) {
     return true;
 }
 
+function compareAdjacencyEdges(a, b) {
+    if (a.roadId < b.roadId) return -1;
+    if (a.roadId > b.roadId) return 1;
+    if (a.to < b.to) return -1;
+    if (a.to > b.to) return 1;
+    return (
+        Number(a.reversed) -
+        Number(b.reversed)
+    );
+}
+
 export class Navigation {
     constructor({
         spatialCellSize = 50,
@@ -324,13 +335,9 @@ export class Navigation {
         const edges = this.adjacency.get(nodeId);
         if (!edges) return;
 
-        edges.sort((a, b) => {
-            if (a.roadId < b.roadId) return -1;
-            if (a.roadId > b.roadId) return 1;
-            if (a.to < b.to) return -1;
-            if (a.to > b.to) return 1;
-            return Number(a.reversed) - Number(b.reversed);
-        });
+        edges.sort(
+            compareAdjacencyEdges,
+        );
     }
 
     #recalculateMaxRoadHalfWidth() {
@@ -1847,7 +1854,7 @@ export class Navigation {
                 );
             }
 
-            let previousSignature = null;
+            let previousEdge = null;
             const seen = new Set();
 
             for (const edge of edges) {
@@ -1889,16 +1896,18 @@ export class Navigation {
                 seen.add(signature);
 
                 if (
-                    previousSignature != null &&
-                    previousSignature >
-                        signature
+                    previousEdge &&
+                    compareAdjacencyEdges(
+                        previousEdge,
+                        edge,
+                    ) > 0
                 ) {
                     throw new Error(
                         `Adjacency order is not deterministic: ${nodeId}`,
                     );
                 }
 
-                previousSignature = signature;
+                previousEdge = edge;
             }
         }
 
