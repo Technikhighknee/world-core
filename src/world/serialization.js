@@ -153,7 +153,12 @@ function serializeLodTiers(world) {
 
     return world.movementLodTiers.map(
         tier => ({
-            maxDistance: tier.maxDistance,
+            maxDistance:
+                Number.isFinite(
+                    tier.maxDistance,
+                )
+                    ? tier.maxDistance
+                    : null,
             interval: tier.interval,
         }),
     );
