@@ -9,6 +9,10 @@ import {
     stopJourney,
 } from "../src/world/movement.js";
 import { stepSimulation } from "../src/world/simulation.js";
+import {
+    deserializeWorldCore,
+    serializeWorldCore,
+} from "../src/world/serialization.js";
 import { SpatialHash } from "../src/world/spatial-hash.js";
 import { StaticSpatialIndex } from "../src/world/static-spatial-index.js";
 import { World } from "../src/world/world.js";
@@ -1671,5 +1675,345 @@ test("failed automatic replanning emits journeyFailed with the reason", () => {
     assert.equal(
         events.at(-1).reason,
         "route-invalidated",
+    );
+});
+
+
+test("world-core snapshots survive JSON round-trips and preserve dynamic navigation", () => {
+    const navigation = new Navigation({
+        spatialCellSize: 25,
+        routeCacheSize: 17,
+        routeCacheMaxLegs: 23,
+        routeCacheMaxTotalLegs: 91,
+    });
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+    navigation.addNode({ id: "c", x: 200, y: 0 });
+
+    navigation.addRoad({
+        id: "ab",
+        from: "a",
+        to: "b",
+        width: 5,
+        surface: "street",
+        allowedProfiles: ["pedestrian"],
+        tags: ["public"],
+        shape: [{ x: 50, y: 10 }],
+    });
+
+    navigation.addRoad({
+        id: "bc",
+        from: "b",
+        to: "c",
+        width: 4,
+        surface: "road",
+        bidirectional: false,
+    });
+
+    navigation.setRoadWidth("ab", 6);
+    navigation.setRoadSurface("ab", "mud");
+    navigation.setRoadAccess("ab", {
+        allowedProfiles: ["pedestrian", "horse"],
+        blockedProfiles: ["cart"],
+        tags: ["public", "market"],
+    });
+    navigation.replaceRoadGeometry("ab", [
+        { x: 40, y: 12 },
+        { x: 70, y: -4 },
+    ]);
+
+    const world = new World({
+        spatialCellSize: 12,
+        captureEvents: true,
+        movementLodTiers: [
+            { maxDistance: 50, interval: 0 },
+            { maxDistance: Infinity, interval: 10 },
+        ],
+        interestPoints: [{ x: 0, y: 0 }],
+        localSteering: {
+            enabled: true,
+            neighborRadius: 3,
+        },
+    });
+
+    world.time = 123.5;
+
+    world.addEntity({
+        id: "walker",
+        kind: "person",
+        position: { x: 0, y: 0 },
+        mobility: mobilityProfile("pedestrian"),
+    });
+
+    world.addEntity({
+        id: "custom",
+        position: { x: 10, y: 10 },
+        mobility: {
+            profileId: "custom",
+            speed: 1.1,
+            requiredRoadWidth: 1,
+        },
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "walker",
+        "b",
+    );
+
+    world.emitEvent("transient", {
+        entityId: "walker",
+    });
+
+    const encoded = JSON.stringify(
+        serializeWorldCore(
+            world,
+            navigation,
+        ),
+    );
+
+    const restored = deserializeWorldCore(
+        JSON.parse(encoded),
+    );
+
+    assert.equal(restored.world.time, 123.5);
+    assert.equal(restored.world.spatial.cellSize, 12);
+    assert.equal(restored.navigation.nodeIndex.cellSize, 25);
+    assert.equal(restored.navigation.routeCacheSize, 17);
+    assert.equal(restored.navigation.routeCache.size, 0);
+    assert.equal(restored.world.peekEvents().length, 0);
+    assert.equal(restored.world.captureEvents, true);
+
+    assert.equal(
+        restored.world.movementLodTiers.at(-1).maxDistance,
+        Infinity,
+    );
+
+    const restoredRoad =
+        restored.navigation.roads.get("ab");
+
+    assert.equal(restoredRoad.width, 6);
+    assert.equal(restoredRoad.surface, "mud");
+    assert.equal(restoredRoad.version, 5);
+    assert.deepEqual(
+        restoredRoad.allowedProfiles,
+        ["horse", "pedestrian"],
+    );
+    assert.deepEqual(
+        restoredRoad.blockedProfiles,
+        ["cart"],
+    );
+    assert.deepEqual(
+        restoredRoad.tags,
+        ["market", "public"],
+    );
+    assert.deepEqual(
+        restoredRoad.points,
+        [
+            { x: 0, y: 0 },
+            { x: 40, y: 12 },
+            { x: 70, y: -4 },
+            { x: 100, y: 0 },
+        ],
+    );
+
+    assert.strictEqual(
+        restored.world.getEntity("walker").mobility,
+        mobilityProfile("pedestrian"),
+    );
+
+    assert.equal(
+        restored.world.getEntity("custom").mobility.speed,
+        1.1,
+    );
+
+    assert.ok(
+        restored.world.getEntity("walker").journey,
+    );
+
+    restored.world.assertInternalConsistency();
+});
+
+test("snapshot restoration preserves shared active routes without restoring route cache", () => {
+    const world = new World();
+    const navigation = new Navigation();
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+    });
+
+    for (const id of ["one", "two"]) {
+        world.addEntity({
+            id,
+            position: { x: 0, y: 0 },
+            mobility: mobilityProfile("pedestrian"),
+        });
+
+        startJourney(
+            world,
+            navigation,
+            id,
+            "b",
+        );
+    }
+
+    assert.strictEqual(
+        world.getEntity("one").journey.route,
+        world.getEntity("two").journey.route,
+    );
+
+    const snapshot =
+        serializeWorldCore(world, navigation);
+
+    const restored =
+        deserializeWorldCore(
+            structuredClone(snapshot),
+        );
+
+    assert.strictEqual(
+        restored.world.getEntity("one").journey.route,
+        restored.world.getEntity("two").journey.route,
+    );
+
+    assert.equal(
+        restored.navigation.routeCache.size,
+        0,
+    );
+});
+
+test("save and restore resumes to the same deterministic end state including LOD accumulator", () => {
+    function createSimulation() {
+        const navigation = new Navigation();
+
+        navigation.addNode({
+            id: "a",
+            x: 1000,
+            y: 0,
+        });
+        navigation.addNode({
+            id: "b",
+            x: 1200,
+            y: 0,
+        });
+        navigation.addRoad({
+            id: "road",
+            from: "a",
+            to: "b",
+        });
+
+        const world = new World({
+            movementLodTiers: [
+                {
+                    maxDistance: 100,
+                    interval: 0,
+                },
+                {
+                    maxDistance: Infinity,
+                    interval: 10,
+                },
+            ],
+            interestPoints: [
+                { x: 0, y: 0 },
+            ],
+        });
+
+        world.addEntity({
+            id: "walker",
+            position: { x: 1000, y: 0 },
+            mobility: {
+                profileId: "save-test",
+                speed: 1,
+            },
+        });
+
+        startJourney(
+            world,
+            navigation,
+            "walker",
+            "b",
+        );
+
+        return { world, navigation };
+    }
+
+    const uninterrupted = createSimulation();
+    const toRestore = createSimulation();
+
+    for (let i = 0; i < 7; i++) {
+        stepSimulation(
+            uninterrupted.world,
+            uninterrupted.navigation,
+            1,
+        );
+        stepSimulation(
+            toRestore.world,
+            toRestore.navigation,
+            1,
+        );
+    }
+
+    const interval = 10;
+
+    assert.equal(
+        toRestore.world.movementAccumulators.get(interval),
+        7,
+    );
+
+    const restored = deserializeWorldCore(
+        JSON.parse(
+            JSON.stringify(
+                serializeWorldCore(
+                    toRestore.world,
+                    toRestore.navigation,
+                ),
+            ),
+        ),
+    );
+
+    assert.equal(
+        restored.world.movementAccumulators.get(interval),
+        7,
+    );
+
+    for (let i = 0; i < 23; i++) {
+        stepSimulation(
+            uninterrupted.world,
+            uninterrupted.navigation,
+            1,
+        );
+        stepSimulation(
+            restored.world,
+            restored.navigation,
+            1,
+        );
+    }
+
+    assert.deepEqual(
+        serializeWorldCore(
+            restored.world,
+            restored.navigation,
+        ),
+        serializeWorldCore(
+            uninterrupted.world,
+            uninterrupted.navigation,
+        ),
+    );
+});
+
+test("unsupported snapshot versions are rejected", () => {
+    assert.throws(
+        () =>
+            deserializeWorldCore({
+                format: "world-core",
+                version: 999,
+            }),
+        /Unsupported world-core snapshot/,
     );
 });
