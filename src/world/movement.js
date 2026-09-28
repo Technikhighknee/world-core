@@ -1,3 +1,8 @@
+import {
+    applyLocalSteering,
+    createLocalSteeringContext,
+} from "./local-steering.js";
+
 const EPSILON = 0.000001;
 const EPSILON_SQUARED = EPSILON * EPSILON;
 
@@ -419,9 +424,6 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
 
         const surfaceMultiplier =
             entity.mobility.surfaceMultipliers?.[road.surface] ?? 1;
-        const speed = entity.mobility.speed * surfaceMultiplier;
-
-        if (!(speed > 0)) break;
 
         const target = road.points[journey.pointIndex];
 
@@ -429,6 +431,25 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             finishJourney(world, entity);
             break;
         }
+
+        const steeringContext =
+            createLocalSteeringContext(
+                world,
+                entity,
+                road,
+                x,
+                y,
+                target.x,
+                target.y,
+                remainingTime,
+            );
+
+        const speed =
+            entity.mobility.speed *
+            surfaceMultiplier *
+            (steeringContext?.speedMultiplier ?? 1);
+
+        if (!(speed > 0)) break;
 
         const dx = target.x - x;
         const dy = target.y - y;
@@ -459,10 +480,26 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             continue;
         }
 
-        const scale = speed * remainingTime / distanceToTarget;
+        const scale =
+            speed * remainingTime /
+            distanceToTarget;
 
-        x += dx * scale;
-        y += dy * scale;
+        const nominalX =
+            x + dx * scale;
+        const nominalY =
+            y + dy * scale;
+
+        const steered =
+            applyLocalSteering(
+                entity,
+                road,
+                nominalX,
+                nominalY,
+                steeringContext,
+            );
+
+        x = steered.x;
+        y = steered.y;
         moved = true;
         remainingTime = 0;
     }

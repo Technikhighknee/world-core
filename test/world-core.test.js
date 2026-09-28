@@ -1266,3 +1266,223 @@ test("capsule queries honor exclusion and predicates", () => {
         ["person"],
     );
 });
+
+
+test("local steering is opt-in and default movement remains on the centerline", () => {
+    const world = new World();
+    const navigation = new Navigation();
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+        width: 6,
+    });
+
+    world.addEntity({
+        id: "one",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 1 },
+    });
+    world.addEntity({
+        id: "two",
+        position: { x: 0, y: 0 },
+    });
+
+    startJourney(world, navigation, "one", "b");
+    stepSimulation(world, navigation, 1);
+
+    assert.equal(world.getEntity("one").position.y, 0);
+});
+
+test("local steering separates overlapping movers laterally inside road width", () => {
+    const world = new World({
+        localSteering: {
+            neighborRadius: 3,
+            separationStrength: 1,
+            maxLateralSpeed: 1,
+            congestionStrength: 0,
+        },
+    });
+    const navigation = new Navigation();
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+        width: 6,
+    });
+
+    for (const id of ["a-walker", "b-walker"]) {
+        world.addEntity({
+            id,
+            position: { x: 0, y: 0 },
+            body: { radius: 0.35 },
+            mobility: { speed: 1 },
+        });
+
+        startJourney(
+            world,
+            navigation,
+            id,
+            "b",
+        );
+    }
+
+    stepSimulation(world, navigation, 1);
+
+    const first = world.getEntity("a-walker").position;
+    const second = world.getEntity("b-walker").position;
+
+    assert.notEqual(first.y, second.y);
+    assert.ok(Math.abs(first.y) <= 2.6);
+    assert.ok(Math.abs(second.y) <= 2.6);
+});
+
+test("local steering clamps lateral avoidance to the usable road corridor", () => {
+    const world = new World({
+        localSteering: {
+            neighborRadius: 5,
+            separationStrength: 100,
+            maxLateralSpeed: 100,
+            congestionStrength: 0,
+            roadEdgeMargin: 0.05,
+        },
+    });
+    const navigation = new Navigation();
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+    navigation.addRoad({
+        id: "narrow",
+        from: "a",
+        to: "b",
+        width: 1,
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        body: { radius: 0.35 },
+        mobility: { speed: 1 },
+    });
+    world.addEntity({
+        id: "blocker",
+        position: { x: 0, y: 0 },
+        body: { radius: 0.35 },
+    });
+
+    startJourney(world, navigation, "walker", "b");
+    stepSimulation(world, navigation, 1);
+
+    const y = Math.abs(
+        world.getEntity("walker").position.y,
+    );
+
+    assert.ok(y <= 0.100001);
+});
+
+test("local congestion slows movement from measured nearby occupancy", () => {
+    function simulate(crowded) {
+        const world = new World({
+            localSteering: {
+                neighborRadius: 4,
+                congestionThreshold: 0.5,
+                congestionStrength: 2,
+                forwardPressureWeight: 1,
+                minSpeedMultiplier: 0.1,
+                separationStrength: 0,
+            },
+        });
+        const navigation = new Navigation();
+
+        navigation.addNode({
+            id: "a",
+            x: 0,
+            y: 0,
+        });
+        navigation.addNode({
+            id: "b",
+            x: 100,
+            y: 0,
+        });
+        navigation.addRoad({
+            id: "road",
+            from: "a",
+            to: "b",
+            width: 2,
+        });
+
+        world.addEntity({
+            id: "walker",
+            position: { x: 0, y: 0 },
+            body: { radius: 0.35 },
+            mobility: { speed: 2 },
+        });
+
+        if (crowded) {
+            for (let i = 0; i < 5; i++) {
+                world.addEntity({
+                    id: `crowd-${i}`,
+                    position: {
+                        x: 0.5 + i * 0.4,
+                        y: 0,
+                    },
+                    body: { radius: 0.35 },
+                });
+            }
+        }
+
+        startJourney(
+            world,
+            navigation,
+            "walker",
+            "b",
+        );
+        stepSimulation(world, navigation, 1);
+
+        return world.getEntity("walker").position.x;
+    }
+
+    const solo = simulate(false);
+    const crowded = simulate(true);
+
+    assert.ok(crowded < solo);
+    assert.equal(solo, 2);
+});
+
+test("entities can opt out of world local steering individually", () => {
+    const world = new World({
+        localSteering: {
+            neighborRadius: 3,
+            separationStrength: 1,
+            congestionStrength: 0,
+        },
+    });
+    const navigation = buildLineNavigation(100);
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: {
+            speed: 1,
+            localSteering: false,
+        },
+    });
+    world.addEntity({
+        id: "blocker",
+        position: { x: 0, y: 0 },
+    });
+
+    startJourney(world, navigation, "walker", "b");
+    stepSimulation(world, navigation, 1);
+
+    assert.equal(
+        world.getEntity("walker").position.y,
+        0,
+    );
+});
