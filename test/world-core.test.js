@@ -209,7 +209,11 @@ test("cached routes store road references instead of duplicated road geometry", 
         speed: 1,
     });
 
-    assert.deepEqual(route.legs, [{ roadId: "road", reversed: false }]);
+    assert.deepEqual(route.legs, [{
+        roadId: "road",
+        reversed: false,
+        roadVersion: 1,
+    }]);
     assert.equal("points" in route.legs[0], false);
 });
 
@@ -559,7 +563,11 @@ test("mid-road journeys share cached base routes instead of copying route legs",
 
     assert.strictEqual(one.route, two.route);
     assert.deepEqual(one.route.legs, [
-        { roadId: "bc", reversed: false },
+        {
+            roadId: "bc",
+            reversed: false,
+            roadVersion: 1,
+        },
     ]);
     assert.equal(one.prefixLeg.roadId, "ab");
     assert.equal(two.prefixLeg.roadId, "ab");
@@ -718,4 +726,380 @@ test("changing entity radius does not rewrite its center cell", () => {
     );
     assert.equal(world.maxEntityRadius, 25);
     assert.equal(world.spatial.membershipCount(), 1);
+});
+
+
+test("deterministic A* chooses the same equal-cost route regardless of road insertion order", () => {
+    function build(order) {
+        const navigation = new Navigation();
+
+        navigation.addNode({ id: "a", x: 0, y: 0 });
+        navigation.addNode({ id: "b", x: 10, y: -10 });
+        navigation.addNode({ id: "c", x: 10, y: 10 });
+        navigation.addNode({ id: "d", x: 20, y: 0 });
+
+        const roads = {
+            ab: { id: "ab", from: "a", to: "b" },
+            bd: { id: "bd", from: "b", to: "d" },
+            ac: { id: "ac", from: "a", to: "c" },
+            cd: { id: "cd", from: "c", to: "d" },
+        };
+
+        for (const id of order) {
+            navigation.addRoad(roads[id]);
+        }
+
+        return navigation;
+    }
+
+    const mobility = {
+        profileId: "deterministic",
+        speed: 1,
+    };
+
+    const first = build(["ab", "bd", "ac", "cd"])
+        .findRoute("a", "d", mobility);
+    const second = build(["cd", "ac", "bd", "ab"])
+        .findRoute("a", "d", mobility);
+
+    assert.deepEqual(
+        first.legs.map(leg => leg.roadId),
+        second.legs.map(leg => leg.roadId),
+    );
+});
+
+test("identical simulation inputs produce identical movement state", () => {
+    function run() {
+        const world = new World({ spatialCellSize: 10 });
+        const navigation = new Navigation();
+
+        navigation.addNode({ id: "a", x: 0, y: 0 });
+        navigation.addNode({ id: "b", x: 100, y: 20 });
+        navigation.addNode({ id: "c", x: 200, y: 0 });
+
+        navigation.addRoad({
+            id: "ab",
+            from: "a",
+            to: "b",
+            shape: [
+                { x: 25, y: 5 },
+                { x: 50, y: 15 },
+                { x: 75, y: 10 },
+            ],
+        });
+
+        navigation.addRoad({
+            id: "bc",
+            from: "b",
+            to: "c",
+            shape: [
+                { x: 125, y: 10 },
+                { x: 150, y: 0 },
+                { x: 175, y: 5 },
+            ],
+        });
+
+        world.addEntity({
+            id: "walker",
+            position: { x: 0, y: 0 },
+            mobility: {
+                profileId: "deterministic-walker",
+                speed: 1.3,
+            },
+        });
+
+        startJourney(world, navigation, "walker", "c");
+
+        for (let i = 0; i < 137; i++) {
+            stepSimulation(world, navigation, 0.5);
+        }
+
+        return structuredClone({
+            time: world.time,
+            entity: world.getEntity("walker"),
+        });
+    }
+
+    assert.deepEqual(run(), run());
+});
+
+test("road constraints filter routes by profile width and tags", () => {
+    const navigation = new Navigation();
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 10, y: 0 });
+    navigation.addNode({ id: "c", x: 20, y: 0 });
+    navigation.addNode({ id: "d", x: 10, y: 10 });
+
+    navigation.addRoad({
+        id: "narrow",
+        from: "a",
+        to: "b",
+        width: 1,
+        allowedProfiles: ["pedestrian"],
+    });
+    navigation.addRoad({
+        id: "narrow-2",
+        from: "b",
+        to: "c",
+        width: 1,
+        allowedProfiles: ["pedestrian"],
+    });
+    navigation.addRoad({
+        id: "wide",
+        from: "a",
+        to: "d",
+        width: 4,
+        tags: ["cart-road"],
+    });
+    navigation.addRoad({
+        id: "wide-2",
+        from: "d",
+        to: "c",
+        width: 4,
+        tags: ["cart-road"],
+    });
+
+    const pedestrian = {
+        profileId: "pedestrian",
+        speed: 1,
+    };
+    const cart = {
+        profileId: "cart",
+        speed: 1,
+        requiredRoadWidth: 2,
+        requiredRoadTags: ["cart-road"],
+    };
+
+    assert.deepEqual(
+        navigation.findRoute("a", "c", pedestrian)
+            .legs.map(leg => leg.roadId),
+        ["narrow", "narrow-2"],
+    );
+
+    assert.deepEqual(
+        navigation.findRoute("a", "c", cart)
+            .legs.map(leg => leg.roadId),
+        ["wide", "wide-2"],
+    );
+});
+
+test("dynamic road mutations update routing and connected components", () => {
+    const navigation = new Navigation();
+    const mobility = {
+        profileId: "walker",
+        speed: 1,
+    };
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 10, y: 0 });
+    navigation.addNode({ id: "c", x: 20, y: 0 });
+
+    navigation.addRoad({
+        id: "ab",
+        from: "a",
+        to: "b",
+    });
+    navigation.addRoad({
+        id: "bc",
+        from: "b",
+        to: "c",
+    });
+
+    assert.ok(navigation.findRoute("a", "c", mobility));
+
+    navigation.setRoadEnabled("bc", false);
+    assert.equal(navigation.findRoute("a", "c", mobility), null);
+
+    navigation.setRoadEnabled("bc", true);
+    assert.ok(navigation.findRoute("a", "c", mobility));
+
+    navigation.removeRoad("bc");
+    assert.equal(navigation.findRoute("a", "c", mobility), null);
+
+    navigation.addRoad({
+        id: "bc-2",
+        from: "b",
+        to: "c",
+    });
+    assert.ok(navigation.findRoute("a", "c", mobility));
+
+    navigation.removeNode("b");
+
+    assert.equal(navigation.nodes.has("b"), false);
+    assert.equal(navigation.roads.has("ab"), false);
+    assert.equal(navigation.roads.has("bc-2"), false);
+    assert.equal(navigation.findRoute("a", "c", mobility), null);
+});
+
+test("road geometry width surface access and direction mutations invalidate old route legs", () => {
+    const navigation = new Navigation();
+    const mobility = {
+        profileId: "walker",
+        speed: 1,
+    };
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+        width: 4,
+    });
+
+    const versions = [];
+
+    versions.push(navigation.roads.get("road").version);
+    navigation.setRoadWidth("road", 5);
+    versions.push(navigation.roads.get("road").version);
+    navigation.setRoadSurface("road", "mud");
+    versions.push(navigation.roads.get("road").version);
+    navigation.setRoadAccess("road", {
+        tags: ["public"],
+    });
+    versions.push(navigation.roads.get("road").version);
+    navigation.replaceRoadGeometry("road", [
+        { x: 50, y: 20 },
+    ]);
+    versions.push(navigation.roads.get("road").version);
+    navigation.setRoadBidirectional("road", false);
+    versions.push(navigation.roads.get("road").version);
+
+    assert.deepEqual(
+        versions,
+        [1, 2, 3, 4, 5, 6],
+    );
+
+    assert.ok(navigation.findRoute("a", "b", mobility));
+    assert.equal(navigation.findRoute("b", "a", mobility), null);
+    assert.equal(
+        navigation.roadAt({ x: 50, y: 20 })?.road.id,
+        "road",
+    );
+});
+
+test("journey automatically replans when a future road becomes stale", () => {
+    const world = new World();
+    const navigation = new Navigation();
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 10, y: 0 });
+    navigation.addNode({ id: "c", x: 20, y: 0 });
+    navigation.addNode({ id: "d", x: 10, y: 10 });
+
+    navigation.addRoad({
+        id: "ab",
+        from: "a",
+        to: "b",
+    });
+    navigation.addRoad({
+        id: "bc",
+        from: "b",
+        to: "c",
+    });
+    navigation.addRoad({
+        id: "ad",
+        from: "a",
+        to: "d",
+    });
+    navigation.addRoad({
+        id: "dc",
+        from: "d",
+        to: "c",
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: {
+            profileId: "walker",
+            speed: 1,
+        },
+    });
+
+    assert.equal(
+        startJourney(world, navigation, "walker", "c"),
+        true,
+    );
+
+    navigation.setRoadEnabled("bc", false);
+
+    stepSimulation(world, navigation, 1);
+
+    const journey = world.getEntity("walker").journey;
+
+    assert.ok(journey);
+    assert.deepEqual(
+        journey.route.legs.map(leg => leg.roadId),
+        ["ad", "dc"],
+    );
+});
+
+test("journey stops with an explicit failure when invalidation leaves no route", () => {
+    const world = new World();
+    const navigation = buildLineNavigation(100);
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: {
+            profileId: "walker",
+            speed: 1,
+        },
+    });
+
+    startJourney(world, navigation, "walker", "b");
+    navigation.setRoadEnabled("road", false);
+
+    stepSimulation(world, navigation, 1);
+
+    const walker = world.getEntity("walker");
+
+    assert.equal(walker.journey, null);
+    assert.equal(
+        walker.lastJourneyFailure.reason,
+        "route-invalidated",
+    );
+    assert.equal(world.movingEntities.has("walker"), false);
+});
+
+test("arbitrary-position navigation entry can connect an off-network entity", () => {
+    const world = new World();
+    const navigation = buildLineNavigation(100);
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 20, y: 8 },
+        mobility: {
+            profileId: "walker",
+            speed: 1,
+        },
+    });
+
+    assert.equal(
+        startJourney(
+            world,
+            navigation,
+            "walker",
+            "b",
+            { entryMaxDistance: 10 },
+        ),
+        true,
+    );
+
+    const journey = world.getEntity("walker").journey;
+
+    assert.deepEqual(
+        journey.entryPoint,
+        { x: 20, y: 0 },
+    );
+
+    stepSimulation(world, navigation, 8);
+
+    assert.ok(
+        Math.abs(world.getEntity("walker").position.y) <
+        1e-9,
+    );
 });
