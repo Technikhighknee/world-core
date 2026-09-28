@@ -47,6 +47,8 @@ function beginJourney(world, navigation, entity, destinationNodeId, planned) {
         pointIndex: firstRoad
             ? initialPointIndex(firstRoad, firstLeg)
             : 0,
+        validatedGraphRevision:
+            navigation.graphRevision,
     };
 
     world.markMoving(entity.id);
@@ -147,6 +149,45 @@ export function updateMovement(world, navigation, deltaSeconds) {
                 if (!entity.journey) {
                     world.unmarkMoving(entityId);
                     continue;
+                }
+
+                const journey = entity.journey;
+
+                if (
+                    journey.validatedGraphRevision !==
+                    navigation.graphRevision
+                ) {
+                    const prefixCurrent =
+                        !journey.prefixLeg ||
+                        navigation.isRouteLegCurrent(
+                            journey.prefixLeg,
+                            entity.mobility,
+                        );
+
+                    const routeCurrent =
+                        navigation.isRouteCurrent(
+                            journey.route,
+                            entity.mobility,
+                            journey.legIndex,
+                        );
+
+                    if (
+                        !prefixCurrent ||
+                        !routeCurrent
+                    ) {
+                        if (
+                            !replanInvalidJourney(
+                                world,
+                                navigation,
+                                entity,
+                            )
+                        ) {
+                            continue;
+                        }
+                    } else {
+                        journey.validatedGraphRevision =
+                            navigation.graphRevision;
+                    }
                 }
 
                 moveEntity(world, navigation, entity, elapsedSeconds);
