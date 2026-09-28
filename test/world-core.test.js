@@ -1486,3 +1486,190 @@ test("entities can opt out of world local steering individually", () => {
         0,
     );
 });
+
+
+test("movement event capture is opt-in and drainable without replacing the target array", () => {
+    const world = new World();
+    const navigation = buildLineNavigation(10);
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(world, navigation, "walker", "b");
+    stepSimulation(world, navigation, 10);
+
+    assert.equal(world.peekEvents().length, 0);
+
+    world.setEventCapture(true);
+
+    world.setPosition("walker", { x: 0, y: 0 });
+    startJourney(world, navigation, "walker", "b");
+    stepSimulation(world, navigation, 10);
+
+    const target = [];
+    const drained = world.drainEvents(target);
+
+    assert.strictEqual(drained, target);
+    assert.equal(world.peekEvents().length, 0);
+    assert.deepEqual(
+        drained.map(event => event.type),
+        [
+            "journeyStarted",
+            "roadEntered",
+            "roadLeft",
+            "journeyCompleted",
+        ],
+    );
+});
+
+test("road lifecycle events are emitted in deterministic traversal order", () => {
+    const world = new World({
+        captureEvents: true,
+    });
+    const navigation = new Navigation();
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 10, y: 0 });
+    navigation.addNode({ id: "c", x: 20, y: 0 });
+
+    navigation.addRoad({
+        id: "ab",
+        from: "a",
+        to: "b",
+    });
+    navigation.addRoad({
+        id: "bc",
+        from: "b",
+        to: "c",
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(world, navigation, "walker", "c");
+    stepSimulation(world, navigation, 20);
+
+    const events = world.drainEvents();
+
+    assert.deepEqual(
+        events.map(event => [
+            event.type,
+            event.roadId ?? null,
+        ]),
+        [
+            ["journeyStarted", null],
+            ["roadEntered", "ab"],
+            ["roadLeft", "ab"],
+            ["roadEntered", "bc"],
+            ["roadLeft", "bc"],
+            ["journeyCompleted", null],
+        ],
+    );
+
+    assert.equal(events[0].time, 0);
+    assert.equal(events.at(-1).time, 20);
+});
+
+test("manual rerouting and cancellation emit lifecycle events", () => {
+    const world = new World({
+        captureEvents: true,
+    });
+    const navigation = new Navigation();
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+    navigation.addNode({ id: "c", x: 0, y: 100 });
+
+    navigation.addRoad({
+        id: "ab",
+        from: "a",
+        to: "b",
+    });
+    navigation.addRoad({
+        id: "ac",
+        from: "a",
+        to: "c",
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(world, navigation, "walker", "b");
+    world.drainEvents();
+
+    rerouteJourney(
+        world,
+        navigation,
+        "walker",
+        "c",
+    );
+
+    const rerouteTypes =
+        world.drainEvents()
+            .map(event => event.type);
+
+    assert.deepEqual(
+        rerouteTypes,
+        [
+            "journeyRerouted",
+            "roadLeft",
+            "roadEntered",
+        ],
+    );
+
+    stopJourney(
+        world.getEntity("walker"),
+        world,
+    );
+
+    assert.deepEqual(
+        world.drainEvents()
+            .map(event => event.type),
+        [
+            "roadLeft",
+            "journeyCancelled",
+        ],
+    );
+});
+
+test("failed automatic replanning emits journeyFailed with the reason", () => {
+    const world = new World({
+        captureEvents: true,
+    });
+    const navigation = buildLineNavigation(100);
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: {
+            profileId: "walker",
+            speed: 1,
+        },
+    });
+
+    startJourney(world, navigation, "walker", "b");
+    world.drainEvents();
+
+    navigation.setRoadEnabled("road", false);
+    stepSimulation(world, navigation, 1);
+
+    const events = world.drainEvents();
+
+    assert.deepEqual(
+        events.map(event => event.type),
+        ["roadLeft", "journeyFailed"],
+    );
+    assert.equal(
+        events.at(-1).reason,
+        "route-invalidated",
+    );
+});
