@@ -510,9 +510,6 @@ export function validateWorldCoreSnapshot(
             },
         );
 
-    const roadByKey =
-        new Map();
-
     for (
         let index = 0;
         index < roads.length;
@@ -671,10 +668,6 @@ export function validateWorldCoreSnapshot(
             }
         }
 
-        roadByKey.set(
-            nodeKey(road.id),
-            road,
-        );
     }
 
     const world =
@@ -920,6 +913,18 @@ export function validateWorldCoreSnapshot(
             },
         );
 
+    const entityByKey =
+        new Map(
+            entities.map(
+                serialized => [
+                    nodeKey(
+                        serialized.entity.id,
+                    ),
+                    serialized,
+                ],
+            ),
+        );
+
     for (
         let index = 0;
         index <
@@ -1091,12 +1096,7 @@ export function validateWorldCoreSnapshot(
 
             if (requireJourney) {
                 const serialized =
-                    entities.find(
-                        item =>
-                            nodeKey(
-                                item.entity.id,
-                            ) === key,
-                    );
+                    entityByKey.get(key);
 
                 if (
                     !serialized?.journey
