@@ -1,11 +1,115 @@
 import { closestPointOnPolyline } from "./geometry.js";
 
+const EPSILON = 1e-9;
+
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
 
 function deterministicSide(a, b) {
     return String(a) < String(b) ? -1 : 1;
+}
+
+function currentJourneyLeg(entity) {
+    const journey = entity.journey;
+    if (!journey) return null;
+
+    return (
+        journey.prefixLeg ??
+        journey.route.legs[journey.legIndex] ??
+        null
+    );
+}
+
+function headingOnRoad(entity, road) {
+    const leg = currentJourneyLeg(entity);
+
+    if (!leg || leg.roadId !== road.id) {
+        return null;
+    }
+
+    let pointIndex = entity.journey.pointIndex;
+    let target = road.points[pointIndex];
+
+    if (!target) {
+        pointIndex += leg.reversed ? -1 : 1;
+        target = road.points[pointIndex];
+    }
+
+    if (!target) return null;
+
+    const dx = target.x - entity.position.x;
+    const dy = target.y - entity.position.y;
+    const lengthSquared = dx * dx + dy * dy;
+
+    if (lengthSquared <= EPSILON) {
+        return {
+            reversed: leg.reversed,
+            x: null,
+            y: null,
+        };
+    }
+
+    const length = Math.sqrt(lengthSquared);
+
+    return {
+        reversed: leg.reversed,
+        x: dx / length,
+        y: dy / length,
+    };
+}
+
+function steeringState(entity, road, reversed) {
+    entity.simulation ??= {};
+
+    const key =
+        `${road.id}:${reversed ? "reverse" : "forward"}`;
+    let state = entity.simulation.localSteering;
+
+    if (!state || state.key !== key) {
+        state = {
+            key,
+            offset: 0,
+        };
+
+        entity.simulation.localSteering = state;
+    }
+
+    return state;
+}
+
+function signedOffsetFromCenterline(
+    position,
+    road,
+    normalX,
+    normalY,
+) {
+    const closest = closestPointOnPolyline(
+        position,
+        road.points,
+    );
+
+    if (!closest) return 0;
+
+    return (
+        (position.x - closest.point.x) * normalX +
+        (position.y - closest.point.y) * normalY
+    );
+}
+
+function isInsideRoadCorridor(other, road) {
+    const closest = closestPointOnPolyline(
+        other.position,
+        road.points,
+    );
+
+    if (!closest) return false;
+
+    return (
+        closest.distance <=
+        road.width / 2 +
+            (other.body?.radius ?? 0)
+    );
 }
 
 export function createLocalSteeringContext(
@@ -29,13 +133,42 @@ export function createLocalSteeringContext(
     const dy = targetY - fromY;
     const lengthSquared = dx * dx + dy * dy;
 
-    if (lengthSquared <= 1e-12) return null;
+    if (lengthSquared <= EPSILON) return null;
 
     const length = Math.sqrt(lengthSquared);
     const dirX = dx / length;
     const dirY = dy / length;
     const normalX = -dirY;
     const normalY = dirX;
+    const currentLeg = currentJourneyLeg(entity);
+    const reversed = Boolean(currentLeg?.reversed);
+
+    const state = steeringState(
+        entity,
+        road,
+        reversed,
+    );
+
+    const measuredOffset =
+        signedOffsetFromCenterline(
+            { x: fromX, y: fromY },
+            road,
+            normalX,
+            normalY,
+        );
+
+    if (
+        Math.abs(
+            measuredOffset - state.offset,
+        ) >
+        Math.max(
+            0.05,
+            config.maxLateralSpeed *
+                Math.max(deltaSeconds, 0),
+        )
+    ) {
+        state.offset = measuredOffset;
+    }
 
     const neighbors = world.queryRadiusInto(
         { x: fromX, y: fromY },
@@ -48,24 +181,19 @@ export function createLocalSteeringContext(
     let lateralForce = 0;
     let occupancyWidth = selfRadius * 2;
     let forwardPressure = 0;
+    let relevantNeighbors = 0;
 
     for (const other of neighbors) {
+        if (!isInsideRoadCorridor(other, road)) {
+            continue;
+        }
+
+        relevantNeighbors++;
+
         const ox = other.position.x - fromX;
         const oy = other.position.y - fromY;
         const centerDistanceSquared =
             ox * ox + oy * oy;
-
-        if (centerDistanceSquared <= 1e-12) {
-            lateralForce +=
-                deterministicSide(entity.id, other.id);
-            occupancyWidth +=
-                (other.body?.radius ?? 0) * 2;
-            forwardPressure += 1;
-            continue;
-        }
-
-        const centerDistance =
-            Math.sqrt(centerDistanceSquared);
         const otherRadius =
             other.body?.radius ?? 0;
         const desiredSeparation =
@@ -73,8 +201,18 @@ export function createLocalSteeringContext(
             otherRadius +
             config.separationGap;
 
-        const along = ox * dirX + oy * dirY;
-        const lateral = ox * normalX + oy * normalY;
+        let centerDistance = 0;
+        let along = 0;
+        let lateral = 0;
+
+        if (centerDistanceSquared > EPSILON) {
+            centerDistance =
+                Math.sqrt(centerDistanceSquared);
+            along = ox * dirX + oy * dirY;
+            lateral =
+                ox * normalX +
+                oy * normalY;
+        }
 
         if (
             Math.abs(along) <=
@@ -93,9 +231,39 @@ export function createLocalSteeringContext(
                 Math.max(
                     0,
                     1 -
-                    centerDistance /
-                        config.neighborRadius,
+                        centerDistance /
+                            config.neighborRadius,
                 );
+        }
+
+        const otherHeading =
+            headingOnRoad(other, road);
+        const opposing =
+            otherHeading?.x != null &&
+            (
+                dirX * otherHeading.x +
+                dirY * otherHeading.y
+            ) < -0.25;
+
+        if (opposing) {
+            const distanceWeight =
+                Math.max(
+                    0,
+                    1 -
+                        centerDistance /
+                            config.neighborRadius,
+                );
+
+            lateralForce +=
+                (
+                    config.trafficSide === "right"
+                        ? -1
+                        : 1
+                ) *
+                config.counterflowStrength *
+                distanceWeight;
+
+            continue;
         }
 
         if (
@@ -106,22 +274,31 @@ export function createLocalSteeringContext(
         }
 
         const weight =
-            1 -
-            centerDistance /
-                Math.max(
-                    desiredSeparation,
-                    1e-9,
-                );
+            centerDistanceSquared <= EPSILON
+                ? 1
+                : 1 -
+                    centerDistance /
+                        Math.max(
+                            desiredSeparation,
+                            EPSILON,
+                        );
 
         let side;
 
-        if (Math.abs(lateral) <= 1e-9) {
+        if (otherHeading?.x != null) {
             side = deterministicSide(
                 entity.id,
                 other.id,
             );
-        } else {
+        } else if (
+            Math.abs(lateral) > EPSILON
+        ) {
             side = lateral < 0 ? 1 : -1;
+        } else {
+            side = deterministicSide(
+                entity.id,
+                other.id,
+            );
         }
 
         lateralForce += side * weight;
@@ -134,17 +311,46 @@ export function createLocalSteeringContext(
             config.roadEdgeMargin,
     );
 
-    const maxLateralShift = Math.min(
-        usableHalfWidth,
+    const maxLateralStep =
         config.maxLateralSpeed *
-            deltaSeconds,
+        Math.max(deltaSeconds, 0);
+
+    let desiredOffset;
+
+    if (Math.abs(lateralForce) > EPSILON) {
+        desiredOffset =
+            state.offset +
+            lateralForce *
+                config.separationStrength;
+    } else {
+        const centerFactor =
+            Math.max(
+                0,
+                1 -
+                    config.centeringRate *
+                        Math.max(deltaSeconds, 0),
+            );
+
+        desiredOffset =
+            state.offset * centerFactor;
+    }
+
+    desiredOffset = clamp(
+        desiredOffset,
+        -usableHalfWidth,
+        usableHalfWidth,
     );
 
-    const lateralShift = clamp(
-        lateralForce *
-            config.separationStrength,
-        -maxLateralShift,
-        maxLateralShift,
+    const deltaOffset = clamp(
+        desiredOffset - state.offset,
+        -maxLateralStep,
+        maxLateralStep,
+    );
+
+    state.offset = clamp(
+        state.offset + deltaOffset,
+        -usableHalfWidth,
+        usableHalfWidth,
     );
 
     const localCapacity = Math.max(
@@ -181,10 +387,10 @@ export function createLocalSteeringContext(
     return {
         normalX,
         normalY,
-        lateralShift,
+        lateralOffset: state.offset,
         usableHalfWidth,
         speedMultiplier,
-        neighborCount: neighbors.length,
+        neighborCount: relevantNeighbors,
         occupancyRatio,
     };
 }
@@ -198,24 +404,28 @@ export function applyLocalSteering(
 ) {
     if (!context) return { x, y };
 
-    let nextX =
-        x +
-        context.normalX *
-            context.lateralShift;
-    let nextY =
-        y +
-        context.normalY *
-            context.lateralShift;
-
     const closest = closestPointOnPolyline(
-        { x: nextX, y: nextY },
+        { x, y },
         road.points,
     );
 
+    if (!closest) return { x, y };
+
+    let nextX =
+        closest.point.x +
+        context.normalX *
+            context.lateralOffset;
+    let nextY =
+        closest.point.y +
+        context.normalY *
+            context.lateralOffset;
+
+    const offsetDistance =
+        Math.abs(context.lateralOffset);
+
     if (
-        !closest ||
-        closest.distance <=
-            context.usableHalfWidth
+        offsetDistance <=
+        context.usableHalfWidth + EPSILON
     ) {
         return {
             x: nextX,
@@ -223,28 +433,20 @@ export function applyLocalSteering(
         };
     }
 
-    const dx = nextX - closest.point.x;
-    const dy = nextY - closest.point.y;
-    const distance =
-        Math.sqrt(dx * dx + dy * dy);
-
-    if (distance <= 1e-12) {
-        return {
-            x: closest.point.x,
-            y: closest.point.y,
-        };
-    }
-
-    const scale =
-        context.usableHalfWidth /
-        distance;
+    const clampedOffset = clamp(
+        context.lateralOffset,
+        -context.usableHalfWidth,
+        context.usableHalfWidth,
+    );
 
     nextX =
         closest.point.x +
-        dx * scale;
+        context.normalX *
+            clampedOffset;
     nextY =
         closest.point.y +
-        dy * scale;
+        context.normalY *
+            clampedOffset;
 
     return {
         x: nextX,
