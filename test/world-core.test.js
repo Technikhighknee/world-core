@@ -2513,3 +2513,596 @@ test("a stationary blocker produces a stable avoidance side", () => {
         1,
     );
 });
+
+
+test("junction radius allows road transitions without forcing the exact node center", () => {
+    const world = new World();
+    const navigation = new Navigation();
+
+    navigation.addNode({
+        id: "west",
+        x: 0,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "junction",
+        x: 10,
+        y: 0,
+        junctionRadius: 2,
+    });
+    navigation.addNode({
+        id: "north",
+        x: 10,
+        y: 10,
+    });
+
+    navigation.addRoad({
+        id: "west-road",
+        from: "west",
+        to: "junction",
+    });
+    navigation.addRoad({
+        id: "north-road",
+        from: "junction",
+        to: "north",
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 1 },
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "walker",
+        "north",
+    );
+
+    for (let i = 0; i < 8; i++) {
+        stepSimulation(
+            world,
+            navigation,
+            1,
+        );
+    }
+
+    assert.equal(
+        world.getEntity("walker").position.x,
+        8,
+    );
+    assert.equal(
+        world.getEntity("walker").journey.legIndex,
+        0,
+    );
+
+    stepSimulation(
+        world,
+        navigation,
+        0.001,
+    );
+
+    const walker =
+        world.getEntity("walker");
+
+    assert.equal(
+        walker.journey.legIndex,
+        1,
+    );
+
+    assert.notDeepEqual(
+        walker.position,
+        { x: 10, y: 0 },
+    );
+
+    const junctionDistance =
+        Math.hypot(
+            walker.position.x - 10,
+            walker.position.y,
+        );
+
+    assert.ok(
+        junctionDistance <= 2.001,
+    );
+});
+
+test("junction radius can be changed dynamically and is covered by navigation invariants", () => {
+    const navigation = new Navigation();
+
+    navigation.addNode({
+        id: "node",
+        x: 0,
+        y: 0,
+    });
+
+    assert.equal(
+        navigation.nodes.get("node").junctionRadius,
+        0,
+    );
+
+    assert.equal(
+        navigation.setNodeJunctionRadius(
+            "node",
+            3,
+        ),
+        true,
+    );
+
+    assert.equal(
+        navigation.nodes.get("node").junctionRadius,
+        3,
+    );
+
+    navigation.assertInternalConsistency();
+
+    assert.throws(
+        () =>
+            navigation.setNodeJunctionRadius(
+                "node",
+                -1,
+            ),
+        /junctionRadius/,
+    );
+});
+
+test("world obstacles support circle AABB and segment queries with enable and replacement", () => {
+    const world = new World({
+        obstacleCellSize: 5,
+    });
+
+    world.addObstacle({
+        id: "well",
+        type: "circle",
+        center: { x: 10, y: 0 },
+        radius: 2,
+    });
+
+    world.addObstacle({
+        id: "stall",
+        type: "aabb",
+        minX: 20,
+        minY: -2,
+        maxX: 24,
+        maxY: 2,
+    });
+
+    world.addObstacle({
+        id: "wall",
+        type: "segment",
+        a: { x: 30, y: -5 },
+        b: { x: 30, y: 5 },
+        radius: 0.5,
+        temporary: true,
+    });
+
+    assert.deepEqual(
+        world.queryObstaclesRadiusInto(
+            { x: 8, y: 0 },
+            0.1,
+        ).map(obstacle => obstacle.id),
+        ["well"],
+    );
+
+    assert.deepEqual(
+        world.queryObstaclesRadiusInto(
+            { x: 22, y: 0 },
+            0,
+        ).map(obstacle => obstacle.id),
+        ["stall"],
+    );
+
+    assert.deepEqual(
+        world.queryObstaclesRadiusInto(
+            { x: 29.6, y: 0 },
+            0,
+        ).map(obstacle => obstacle.id),
+        ["wall"],
+    );
+
+    world.setObstacleEnabled(
+        "wall",
+        false,
+    );
+
+    assert.deepEqual(
+        world.queryObstaclesRadiusInto(
+            { x: 30, y: 0 },
+            1,
+        ).map(obstacle => obstacle.id),
+        [],
+    );
+
+    world.replaceObstacle(
+        "stall",
+        {
+            minX: 40,
+            maxX: 44,
+        },
+    );
+
+    assert.equal(
+        world.queryObstaclesRadiusInto(
+            { x: 22, y: 0 },
+            1,
+        ).length,
+        0,
+    );
+
+    assert.deepEqual(
+        world.queryObstaclesRadiusInto(
+            { x: 42, y: 0 },
+            0,
+        ).map(obstacle => obstacle.id),
+        ["stall"],
+    );
+
+    world.assertInternalConsistency();
+});
+
+test("local steering avoids a static obstacle inside the road corridor", () => {
+    const world = new World({
+        localSteering: {
+            neighborRadius: 3,
+            obstacleLookahead: 5,
+            obstacleMargin: 0.3,
+            obstacleStrength: 2,
+            maxLateralSpeed: 2,
+            centeringRate: 0.1,
+            congestionStrength: 0,
+            trafficSide: "right",
+        },
+    });
+    const navigation = buildLineNavigation(100);
+
+    world.addObstacle({
+        id: "market-stand",
+        type: "circle",
+        center: { x: 6, y: 0 },
+        radius: 0.6,
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        body: { radius: 0.35 },
+        mobility: { speed: 1.5 },
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "walker",
+        "b",
+    );
+
+    let minimumCenterDistance =
+        Infinity;
+
+    for (let i = 0; i < 40; i++) {
+        stepSimulation(
+            world,
+            navigation,
+            0.1,
+        );
+
+        const position =
+            world.getEntity(
+                "walker",
+            ).position;
+
+        minimumCenterDistance =
+            Math.min(
+                minimumCenterDistance,
+                Math.hypot(
+                    position.x - 6,
+                    position.y,
+                ),
+            );
+    }
+
+    const walker =
+        world.getEntity("walker");
+
+    assert.ok(
+        walker.position.y < -0.05,
+    );
+
+    assert.ok(
+        minimumCenterDistance >
+        0.6,
+    );
+});
+
+test("temporary road effects can block or penalize routing without deleting roads", () => {
+    const navigation = new Navigation();
+    const mobility = {
+        profileId: "walker",
+        speed: 1,
+    };
+
+    navigation.addNode({
+        id: "a",
+        x: 0,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "b",
+        x: 10,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "c",
+        x: 20,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "d",
+        x: 10,
+        y: 8,
+    });
+
+    navigation.addRoad({
+        id: "ab",
+        from: "a",
+        to: "b",
+    });
+    navigation.addRoad({
+        id: "bc",
+        from: "b",
+        to: "c",
+    });
+    navigation.addRoad({
+        id: "ad",
+        from: "a",
+        to: "d",
+    });
+    navigation.addRoad({
+        id: "dc",
+        from: "d",
+        to: "c",
+    });
+
+    assert.deepEqual(
+        navigation.findRoute(
+            "a",
+            "c",
+            mobility,
+        ).legs.map(leg => leg.roadId),
+        ["ab", "bc"],
+    );
+
+    navigation.setRoadEffect(
+        "market-crowd",
+        "ab",
+        {
+            costMultiplier: 5,
+        },
+    );
+
+    assert.deepEqual(
+        navigation.findRoute(
+            "a",
+            "c",
+            mobility,
+        ).legs.map(leg => leg.roadId),
+        ["ad", "dc"],
+    );
+
+    navigation.setRoadEffect(
+        "closed-gate",
+        "dc",
+        {
+            blocked: true,
+        },
+    );
+
+    assert.deepEqual(
+        navigation.findRoute(
+            "a",
+            "c",
+            mobility,
+        ).legs.map(leg => leg.roadId),
+        ["ab", "bc"],
+    );
+
+    assert.equal(
+        navigation.roads.has("dc"),
+        true,
+    );
+
+    navigation.removeRoadEffect(
+        "market-crowd",
+        "ab",
+    );
+    navigation.clearRoadEffect(
+        "closed-gate",
+    );
+
+    assert.deepEqual(
+        navigation.findRoute(
+            "a",
+            "c",
+            mobility,
+        ).legs.map(leg => leg.roadId),
+        ["ab", "bc"],
+    );
+
+    navigation.assertInternalConsistency();
+});
+
+test("active journeys replan when a transient road effect changes route cost", () => {
+    const world = new World();
+    const navigation = new Navigation();
+
+    navigation.addNode({
+        id: "a",
+        x: 0,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "b",
+        x: 10,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "c",
+        x: 20,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "d",
+        x: 10,
+        y: 10,
+    });
+
+    navigation.addRoad({
+        id: "ab",
+        from: "a",
+        to: "b",
+    });
+    navigation.addRoad({
+        id: "bc",
+        from: "b",
+        to: "c",
+    });
+    navigation.addRoad({
+        id: "ad",
+        from: "a",
+        to: "d",
+    });
+    navigation.addRoad({
+        id: "dc",
+        from: "d",
+        to: "c",
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: { x: 0, y: 0 },
+        mobility: {
+            profileId: "walker",
+            speed: 1,
+        },
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "walker",
+        "c",
+    );
+
+    navigation.setRoadEffect(
+        "parade",
+        "bc",
+        {
+            blocked: true,
+        },
+    );
+
+    stepSimulation(
+        world,
+        navigation,
+        0.1,
+    );
+
+    assert.deepEqual(
+        world.getEntity("walker")
+            .journey.route.legs
+            .map(leg => leg.roadId),
+        ["ad", "dc"],
+    );
+});
+
+test("snapshot round-trip preserves junction radii obstacles and transient road effects", () => {
+    const world = new World({
+        obstacleCellSize: 7,
+    });
+    const navigation = new Navigation();
+
+    navigation.addNode({
+        id: "a",
+        x: 0,
+        y: 0,
+        junctionRadius: 1.5,
+    });
+    navigation.addNode({
+        id: "b",
+        x: 10,
+        y: 0,
+    });
+
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+    });
+
+    navigation.setRoadEffect(
+        "construction",
+        "road",
+        {
+            costMultiplier: 3,
+        },
+    );
+
+    world.addObstacle({
+        id: "barrier",
+        type: "segment",
+        a: { x: 5, y: -1 },
+        b: { x: 5, y: 1 },
+        radius: 0.2,
+        temporary: true,
+        tags: ["construction"],
+    });
+
+    const restored =
+        deserializeWorldCore(
+            JSON.parse(
+                JSON.stringify(
+                    serializeWorldCore(
+                        world,
+                        navigation,
+                    ),
+                ),
+            ),
+        );
+
+    assert.equal(
+        restored.navigation.nodes
+            .get("a")
+            .junctionRadius,
+        1.5,
+    );
+
+    assert.equal(
+        restored.navigation
+            .roadCostMultiplier("road"),
+        3,
+    );
+
+    assert.equal(
+        restored.world.obstacles
+            .index.cellSize,
+        7,
+    );
+
+    const obstacle =
+        restored.world.obstacles
+            .obstacles.get("barrier");
+
+    assert.equal(
+        obstacle.temporary,
+        true,
+    );
+    assert.deepEqual(
+        obstacle.tags,
+        ["construction"],
+    );
+
+    restored.world
+        .assertInternalConsistency();
+    restored.navigation
+        .assertInternalConsistency();
+});
