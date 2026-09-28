@@ -792,6 +792,25 @@ export function validateWorldCoreSnapshot(
         "$.world.captureEvents",
     );
 
+    requireInteger(
+        world.eventQueueLimit,
+        "$.world.eventQueueLimit",
+    );
+
+    if (
+        world.eventOverflowPolicy !==
+            "drop-newest" &&
+        world.eventOverflowPolicy !==
+            "drop-oldest" &&
+        world.eventOverflowPolicy !==
+            "throw"
+    ) {
+        fail(
+            "$.world.eventOverflowPolicy",
+            "unsupported event overflow policy",
+        );
+    }
+
     const routes =
         requireArray(
             snapshot.routes,
