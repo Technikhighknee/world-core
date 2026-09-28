@@ -198,3 +198,25 @@ navigation.setRoadEffect(
 ```
 
 Road effects invalidate cached/current routes through road versioning, so active journeys automatically replan when the temporary state changes. Junction radii, obstacles and road effects are included in snapshot format version 2.
+
+
+## Fuzzing, determinism and state hashes
+
+The hardening suite includes deterministic randomized tests for graph mutation, route validity, entity lifecycle churn, steering, spatial queries, temporary road effects, obstacles and save/load round-trips.
+
+For longer runs:
+
+```bash
+npm run bench:determinism
+```
+
+The default determinism soak runs two identical simulations through the same scripted graph mutations, reroutes, obstacle changes and road effects. One simulation is serialized and restored mid-run. State hashes are compared at regular checkpoints and report whether a divergence is in navigation, world configuration or entities.
+
+```js
+import {
+  computeWorldCoreStateHash,
+  computeWorldCoreStateHashes
+} from "world-core";
+```
+
+State hashes are canonicalized so object key order and route object-sharing details do not create false mismatches. Entity and active-mover execution order are included because they can affect future simulation behavior.
