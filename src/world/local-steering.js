@@ -178,6 +178,13 @@ export function createLocalSteeringContext(
         { excludeId: entity.id },
     );
 
+    neighbors.sort(
+        (a, b) =>
+            String(a.id).localeCompare(
+                String(b.id),
+            ),
+    );
+
     const selfRadius = entity.body?.radius ?? 0;
     let lateralForce = 0;
     let occupancyWidth = selfRadius * 2;
