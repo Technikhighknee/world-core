@@ -279,6 +279,12 @@ export class World {
                 options.separationStrength ?? 0.75,
             maxLateralSpeed:
                 options.maxLateralSpeed ?? 0.8,
+            centeringRate:
+                options.centeringRate ?? 0.6,
+            counterflowStrength:
+                options.counterflowStrength ?? 0.8,
+            trafficSide:
+                options.trafficSide ?? "right",
             roadEdgeMargin:
                 options.roadEdgeMargin ?? 0.05,
             congestionThreshold:
@@ -306,6 +312,27 @@ export class World {
         if (!(config.maxLateralSpeed >= 0)) {
             throw new Error(
                 "localSteering.maxLateralSpeed must be greater than or equal to 0",
+            );
+        }
+
+        if (!(config.centeringRate >= 0)) {
+            throw new Error(
+                "localSteering.centeringRate must be greater than or equal to 0",
+            );
+        }
+
+        if (!(config.counterflowStrength >= 0)) {
+            throw new Error(
+                "localSteering.counterflowStrength must be greater than or equal to 0",
+            );
+        }
+
+        if (
+            config.trafficSide !== "right" &&
+            config.trafficSide !== "left"
+        ) {
+            throw new Error(
+                "localSteering.trafficSide must be \"right\" or \"left\"",
             );
         }
 
