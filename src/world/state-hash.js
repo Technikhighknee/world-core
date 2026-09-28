@@ -118,6 +118,10 @@ function semanticSnapshot(
             snapshot.navigation,
         world: snapshot.world,
         entities,
+        entityOrder:
+            snapshot.entityOrder,
+        movingOrder:
+            snapshot.movingOrder,
     };
 }
 
@@ -141,9 +145,14 @@ export function computeWorldCoreStateHashes(
                 snapshot.world,
             ),
         entities:
-            hashCanonical(
-                snapshot.entities,
-            ),
+            hashCanonical({
+                entities:
+                    snapshot.entities,
+                entityOrder:
+                    snapshot.entityOrder,
+                movingOrder:
+                    snapshot.movingOrder,
+            }),
     };
 
     return {
