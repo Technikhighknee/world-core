@@ -231,3 +231,22 @@ npm run bench:snapshot
 ```
 
 The default snapshot benchmark builds 50,000 entities with 20,000 active journeys and reports separate timings for snapshot creation, JSON encoding, JSON parsing, validation, restore and state-hash verification. It also reports JSON size and post-GC retained-memory deltas for each phase.
+
+
+## Runtime memory bounds
+
+Transient event capture is bounded independently of the simulation state. The default queue limit is 10,000 events with a `drop-newest` overflow policy; callers may choose `drop-oldest` or `throw`.
+
+```js
+const world = new World({
+  captureEvents: true,
+  eventQueueLimit: 5000,
+  eventOverflowPolicy: "drop-newest"
+});
+
+console.log(world.getEventQueueStats());
+```
+
+Dropped-event counts are exposed for diagnostics. Event queue configuration is persisted, but pending events and drop counters remain transient.
+
+Movement scheduler buckets are also reclaimed as soon as their last entity leaves. Repeatedly assigning unique coarse-movement intervals therefore does not retain empty bucket/accumulator state. Route caches remain bounded by both route count and total cached legs.
