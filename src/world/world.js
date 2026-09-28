@@ -4,10 +4,12 @@ import {
 } from "./geometry.js";
 import { distanceSquared } from "./vec2.js";
 import { SpatialHash } from "./spatial-hash.js";
+import { ObstacleField } from "./obstacle-field.js";
 
 export class World {
     constructor({
         spatialCellSize = 20,
+        obstacleCellSize = spatialCellSize,
         movementLodTiers = null,
         interestPoints = [],
         localSteering = null,
@@ -20,6 +22,14 @@ export class World {
         this.events = [];
 
         this.spatial = new SpatialHash(spatialCellSize);
+        this.obstacles =
+            new ObstacleField(
+                obstacleCellSize,
+            );
+        this.obstacleQueryCandidates =
+            new Set();
+        this.obstacleQueryResults = [];
+
         this.radiusCounts = new Map();
         this.maxEntityRadius = 0;
 
@@ -170,6 +180,60 @@ export class World {
 
     peekEvents() {
         return this.events;
+    }
+
+    addObstacle(obstacle) {
+        return this.obstacles.add(
+            obstacle,
+        );
+    }
+
+    removeObstacle(obstacleId) {
+        return this.obstacles.remove(
+            obstacleId,
+        );
+    }
+
+    setObstacleEnabled(
+        obstacleId,
+        enabled,
+    ) {
+        return this.obstacles.setEnabled(
+            obstacleId,
+            enabled,
+        );
+    }
+
+    replaceObstacle(
+        obstacleId,
+        patch,
+    ) {
+        return this.obstacles.replace(
+            obstacleId,
+            patch,
+        );
+    }
+
+    queryObstaclesRadiusInto(
+        position,
+        radius,
+        results =
+            this.obstacleQueryResults,
+        {
+            includeDisabled = false,
+            predicate = null,
+        } = {},
+    ) {
+        return this.obstacles.queryRadiusInto(
+            results,
+            position,
+            radius,
+            this.obstacleQueryCandidates,
+            {
+                includeDisabled,
+                predicate,
+            },
+        );
     }
 
     addEntity(entity) {
@@ -840,6 +904,10 @@ export class World {
             radiusTrackedEntities,
             radiusCountEntries: this.radiusCounts.size,
             maxEntityRadius: this.maxEntityRadius,
+            obstacleCount:
+                this.obstacles.obstacles.size,
+            obstacleIndexMemberships:
+                this.obstacles.index.membershipCount(),
         };
     }
 
@@ -897,6 +965,8 @@ export class World {
                 );
             }
         }
+
+        this.obstacles.assertInternalConsistency();
 
         return diagnostics;
     }
