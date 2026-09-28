@@ -1,3 +1,7 @@
+import {
+    circleIntersectsAabb,
+    distanceSquaredPointToSegment,
+} from "./geometry.js";
 import { distanceSquared } from "./vec2.js";
 import { SpatialHash } from "./spatial-hash.js";
 
@@ -425,6 +429,239 @@ export class World {
             this.createSpatialQueryBuffer(),
             options,
         );
+    }
+
+    queryAabbInto(
+        minX,
+        minY,
+        maxX,
+        maxY,
+        buffer,
+        { excludeId = null, predicate = null } = {},
+    ) {
+        if (minX > maxX || minY > maxY) {
+            throw new Error("Invalid AABB bounds");
+        }
+
+        const candidates = buffer.candidates;
+        const results = buffer.results;
+
+        results.length = 0;
+
+        this.spatial.queryBoundsInto(
+            candidates,
+            minX - this.maxEntityRadius,
+            minY - this.maxEntityRadius,
+            maxX + this.maxEntityRadius,
+            maxY + this.maxEntityRadius,
+        );
+
+        for (const entityId of candidates) {
+            if (entityId === excludeId) continue;
+
+            const entity = this.entities.get(entityId);
+            if (!entity) continue;
+
+            const radius = entity.body?.radius ?? 0;
+
+            if (
+                !circleIntersectsAabb(
+                    entity.position,
+                    radius,
+                    minX,
+                    minY,
+                    maxX,
+                    maxY,
+                )
+            ) {
+                continue;
+            }
+
+            if (predicate && !predicate(entity)) continue;
+
+            results.push(entity);
+        }
+
+        return results;
+    }
+
+    queryAabb(
+        minX,
+        minY,
+        maxX,
+        maxY,
+        options = {},
+    ) {
+        return this.queryAabbInto(
+            minX,
+            minY,
+            maxX,
+            maxY,
+            this.createSpatialQueryBuffer(),
+            options,
+        );
+    }
+
+    queryCapsuleInto(
+        a,
+        b,
+        radius,
+        buffer,
+        { excludeId = null, predicate = null } = {},
+    ) {
+        if (!(radius >= 0)) {
+            throw new Error(
+                "Capsule radius must be greater than or equal to 0",
+            );
+        }
+
+        const candidates = buffer.candidates;
+        const results = buffer.results;
+        const broadRadius = radius + this.maxEntityRadius;
+
+        results.length = 0;
+
+        this.spatial.queryBoundsInto(
+            candidates,
+            Math.min(a.x, b.x) - broadRadius,
+            Math.min(a.y, b.y) - broadRadius,
+            Math.max(a.x, b.x) + broadRadius,
+            Math.max(a.y, b.y) + broadRadius,
+        );
+
+        for (const entityId of candidates) {
+            if (entityId === excludeId) continue;
+
+            const entity = this.entities.get(entityId);
+            if (!entity) continue;
+
+            const actualRadius =
+                radius + (entity.body?.radius ?? 0);
+
+            if (
+                distanceSquaredPointToSegment(
+                    entity.position,
+                    a,
+                    b,
+                ) >
+                actualRadius * actualRadius
+            ) {
+                continue;
+            }
+
+            if (predicate && !predicate(entity)) continue;
+
+            results.push(entity);
+        }
+
+        return results;
+    }
+
+    queryCapsule(
+        a,
+        b,
+        radius,
+        options = {},
+    ) {
+        return this.queryCapsuleInto(
+            a,
+            b,
+            radius,
+            this.createSpatialQueryBuffer(),
+            options,
+        );
+    }
+
+    querySegmentInto(
+        a,
+        b,
+        buffer,
+        options = {},
+    ) {
+        return this.queryCapsuleInto(
+            a,
+            b,
+            0,
+            buffer,
+            options,
+        );
+    }
+
+    querySegment(a, b, options = {}) {
+        return this.querySegmentInto(
+            a,
+            b,
+            this.createSpatialQueryBuffer(),
+            options,
+        );
+    }
+
+    queryNearest(
+        position,
+        {
+            maxDistance = Infinity,
+            excludeId = null,
+            predicate = null,
+        } = {},
+    ) {
+        if (!(maxDistance >= 0)) {
+            throw new Error(
+                "maxDistance must be greater than or equal to 0",
+            );
+        }
+
+        let candidates;
+
+        if (Number.isFinite(maxDistance)) {
+            candidates = this.spatial.queryRadius(
+                position,
+                maxDistance + this.maxEntityRadius,
+            );
+        } else {
+            candidates = this.entities.keys();
+        }
+
+        let best = null;
+
+        for (const entityId of candidates) {
+            if (entityId === excludeId) continue;
+
+            const entity = this.entities.get(entityId);
+            if (!entity) continue;
+            if (predicate && !predicate(entity)) continue;
+
+            const centerDistanceSquared =
+                distanceSquared(
+                    position,
+                    entity.position,
+                );
+            const centerDistance =
+                Math.sqrt(centerDistanceSquared);
+            const bodyDistance = Math.max(
+                0,
+                centerDistance -
+                    (entity.body?.radius ?? 0),
+            );
+
+            if (bodyDistance > maxDistance) continue;
+
+            if (
+                !best ||
+                bodyDistance < best.distance ||
+                (
+                    bodyDistance === best.distance &&
+                    entity.id < best.entity.id
+                )
+            ) {
+                best = {
+                    entity,
+                    distance: bodyDistance,
+                    centerDistance,
+                };
+            }
+        }
+
+        return best;
     }
 
     getDiagnostics() {

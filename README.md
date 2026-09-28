@@ -12,7 +12,8 @@ The world stores actual entity coordinates. Navigation is a separate graph used 
 - Movement LOD supports full-detail nearby movers and coarse scheduled updates for distant movers.
 - Dynamic entity lookups use a spatial hash. World entities are indexed by center cell only; body radius is handled by query expansion plus exact distance checks, so large bodies remain query-correct without duplicating dynamic memberships across neighboring cells. Moving inside the same center cell does not rewrite hash buckets.
 - Normal cell coordinates use packed numeric keys instead of transient string keys, and singleton cells store the entity ID directly instead of allocating a Set.
-- Reusable spatial query buffers are available through `createSpatialQueryBuffer()` and `queryRadiusInto()`.
+- Reusable spatial query buffers are available through `createSpatialQueryBuffer()` and the allocation-conscious `queryRadiusInto()`, `queryAabbInto()`, `querySegmentInto()`, and `queryCapsuleInto()` APIs.
+- Spatial primitives include radius, AABB, segment, capsule, and nearest-body queries with exact body-radius filtering.
 - `maxEntityRadius` shrinks when large entities are removed or resized.
 - Frozen mobility profiles are shared between entities instead of duplicated by `structuredClone()`.
 - Navigation nodes and roads use static spatial indexes for local `nodeAt`, `nearestNode` and `roadAt` queries.
