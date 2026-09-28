@@ -2017,3 +2017,29 @@ test("unsupported snapshot versions are rejected", () => {
         /Unsupported world-core snapshot/,
     );
 });
+
+
+test("package self-reference exposes only the intended public API", async () => {
+    const api = await import("world-core");
+
+    assert.deepEqual(
+        Object.keys(api).sort(),
+        [
+            "MOBILITY_PROFILES",
+            "Navigation",
+            "WORLD_CORE_SNAPSHOT_VERSION",
+            "World",
+            "deserializeWorldCore",
+            "mobilityProfile",
+            "rerouteJourney",
+            "serializeWorldCore",
+            "startJourney",
+            "stepSimulation",
+            "stopJourney",
+        ].sort(),
+    );
+
+    assert.equal("SpatialHash" in api, false);
+    assert.equal("StaticSpatialIndex" in api, false);
+    assert.equal("MinPriorityQueue" in api, false);
+});
