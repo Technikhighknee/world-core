@@ -431,6 +431,15 @@ export class Navigation {
         y,
         junctionRadius = 0,
     }) {
+        if (
+            typeof id !== "string" ||
+            id.length === 0
+        ) {
+            throw new Error(
+                "Navigation node id must be a non-empty string",
+            );
+        }
+
         if (this.nodes.has(id)) {
             throw new Error(
                 `Navigation node already exists: ${id}`,
@@ -536,6 +545,26 @@ export class Navigation {
         blockedProfiles = [],
         tags = [],
     }) {
+        if (
+            typeof id !== "string" ||
+            id.length === 0
+        ) {
+            throw new Error(
+                "Road id must be a non-empty string",
+            );
+        }
+
+        if (
+            typeof from !== "string" ||
+            from.length === 0 ||
+            typeof to !== "string" ||
+            to.length === 0
+        ) {
+            throw new Error(
+                "Road endpoint ids must be non-empty strings",
+            );
+        }
+
         if (this.roads.has(id)) {
             throw new Error(
                 `Road already exists: ${id}`,

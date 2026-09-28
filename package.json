@@ -14,7 +14,8 @@
     "bench:steering": "node --expose-gc benchmark/steering.js",
     "bench:determinism": "node benchmark/determinism-soak.js",
     "bench:snapshot": "node --expose-gc benchmark/snapshot.js",
-    "bench:guardrails": "node benchmark/guardrails.js"
+    "bench:guardrails": "node benchmark/guardrails.js",
+    "example:mini-city": "node examples/mini-city.js"
   },
   "keywords": [
     "simulation",
@@ -26,11 +27,16 @@
   "license": "ISC",
   "type": "module",
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,
   "engines": {
     "node": ">=22"
-  }
+  },
+  "types": "./src/index.d.ts"
 }

@@ -261,3 +261,16 @@ npm run bench:guardrails
 Guardrails deliberately use broad failure thresholds derived from the current full-scale GitHub Actions measurements. They are intended to catch catastrophic regressions rather than normal hosted-runner variance: 50k/20k movement p99 above 150 ms, churn heap above 512 MiB, RSS above 768 MiB, snapshot JSON above 64 MiB, snapshot validation above 1 s, restore above 3 s, 5k local-steering p99 above 75 ms, or steering cost above 50x the centerline baseline.
 
 Thresholds can be overridden with `GUARDRAIL_*` environment variables. CI uses `GUARDRAIL_FAST=1` only to verify the harness and parsers; the manual Performance workflow runs the full workloads.
+
+
+## TypeScript and consumer example
+
+The package ships first-party declarations through `src/index.d.ts`; no runtime TypeScript dependency is required. Public navigation node, road and destination IDs are non-empty strings. Entity and obstacle IDs may be strings or numbers.
+
+A package-level consumer example exercises the same public surface an external game would use:
+
+```bash
+npm run example:mini-city
+```
+
+It builds a small street graph, enables crowd steering, adds a market obstacle, applies and clears a temporary road closure, serializes/restores mid-simulation and drains movement events. The matching integration test imports only from `"world-core"`, so internal implementation imports cannot hide gaps in the published API.
