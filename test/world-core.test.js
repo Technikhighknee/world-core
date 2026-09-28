@@ -1391,7 +1391,7 @@ test("local congestion slows movement from measured nearby occupancy", () => {
         const world = new World({
             localSteering: {
                 neighborRadius: 4,
-                congestionThreshold: 0.25,
+                congestionThreshold: 0.5,
                 congestionStrength: 2,
                 forwardPressureWeight: 1,
                 minSpeedMultiplier: 0.1,
