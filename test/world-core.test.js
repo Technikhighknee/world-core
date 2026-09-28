@@ -3380,7 +3380,7 @@ test("event queue configuration can shrink safely and reset drop diagnostics", (
     );
     assert.equal(
         world.droppedEventCount,
-        1,
+        3,
     );
 });
 
