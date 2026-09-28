@@ -1363,6 +1363,495 @@ export class Navigation {
         return best;
     }
 
+    getDiagnostics() {
+        let adjacencyEdges = 0;
+
+        for (const edges of this.adjacency.values()) {
+            adjacencyEdges += edges.length;
+        }
+
+        return {
+            nodeCount: this.nodes.size,
+            roadCount: this.roads.size,
+            adjacencyNodeCount: this.adjacency.size,
+            adjacencyEdgeCount: adjacencyEdges,
+            componentCount: this.componentMembers.size,
+            nodeIndexItemCount: this.nodeIndex.itemCells.size,
+            nodeIndexMemberships: this.nodeIndex.membershipCount(),
+            roadIndexItemCount: this.roadIndex.itemCells.size,
+            roadIndexMemberships: this.roadIndex.membershipCount(),
+            routeCacheSize: this.routeCache.size,
+            routeCacheLegCount: this.routeCacheLegCount,
+            graphRevision: this.graphRevision,
+            maxRoadHalfWidth: this.maxRoadHalfWidth,
+        };
+    }
+
+    assertInternalConsistency() {
+        const diagnostics = this.getDiagnostics();
+
+        if (
+            diagnostics.adjacencyNodeCount !==
+            diagnostics.nodeCount
+        ) {
+            throw new Error(
+                `Adjacency node count drift: ${diagnostics.adjacencyNodeCount} adjacency entries for ${diagnostics.nodeCount} nodes`,
+            );
+        }
+
+        if (
+            diagnostics.nodeIndexItemCount !==
+            diagnostics.nodeCount
+        ) {
+            throw new Error(
+                `Node index drift: ${diagnostics.nodeIndexItemCount} indexed nodes for ${diagnostics.nodeCount} nodes`,
+            );
+        }
+
+        if (
+            diagnostics.roadIndexItemCount !==
+            diagnostics.roadCount
+        ) {
+            throw new Error(
+                `Road index drift: ${diagnostics.roadIndexItemCount} indexed roads for ${diagnostics.roadCount} roads`,
+            );
+        }
+
+        for (const nodeId of this.nodeIndex.itemCells.keys()) {
+            if (!this.nodes.has(nodeId)) {
+                throw new Error(
+                    `Node index contains stale node: ${nodeId}`,
+                );
+            }
+        }
+
+        for (const roadId of this.roadIndex.itemCells.keys()) {
+            if (!this.roads.has(roadId)) {
+                throw new Error(
+                    `Road index contains stale road: ${roadId}`,
+                );
+            }
+        }
+
+        let expectedMaxRoadHalfWidth = 0;
+        let expectedAdjacencyEdges = 0;
+
+        for (const [nodeId, node] of this.nodes) {
+            if (!this.adjacency.has(nodeId)) {
+                throw new Error(
+                    `Node missing adjacency list: ${nodeId}`,
+                );
+            }
+
+            if (!this.nodeIndex.itemCells.has(nodeId)) {
+                throw new Error(
+                    `Node missing from spatial index: ${nodeId}`,
+                );
+            }
+
+            const members =
+                this.componentMembers.get(
+                    node.componentId,
+                );
+
+            if (!members?.has(nodeId)) {
+                throw new Error(
+                    `Node component membership mismatch: ${nodeId}`,
+                );
+            }
+        }
+
+        for (const [roadId, road] of this.roads) {
+            const from = this.nodes.get(road.from);
+            const to = this.nodes.get(road.to);
+
+            if (!from || !to) {
+                throw new Error(
+                    `Road has missing endpoint node: ${roadId}`,
+                );
+            }
+
+            if (!(road.width > 0)) {
+                throw new Error(
+                    `Road has invalid width: ${roadId}`,
+                );
+            }
+
+            if (
+                !Number.isFinite(road.length) ||
+                road.length < 0
+            ) {
+                throw new Error(
+                    `Road has invalid length: ${roadId}`,
+                );
+            }
+
+            if (
+                !Number.isInteger(road.version) ||
+                road.version < 1
+            ) {
+                throw new Error(
+                    `Road has invalid version: ${roadId}`,
+                );
+            }
+
+            if (
+                road.points.length < 2 ||
+                road.points[0].x !== from.position.x ||
+                road.points[0].y !== from.position.y ||
+                road.points.at(-1).x !== to.position.x ||
+                road.points.at(-1).y !== to.position.y
+            ) {
+                throw new Error(
+                    `Road geometry endpoint mismatch: ${roadId}`,
+                );
+            }
+
+            const measuredLength =
+                polylineLength(road.points);
+
+            if (
+                Math.abs(
+                    measuredLength - road.length,
+                ) > EPSILON
+            ) {
+                throw new Error(
+                    `Road length mismatch: ${roadId}`,
+                );
+            }
+
+            if (!this.roadIndex.itemCells.has(roadId)) {
+                throw new Error(
+                    `Road missing from spatial index: ${roadId}`,
+                );
+            }
+
+            const forwardMatches =
+                (this.adjacency.get(road.from) ?? [])
+                    .filter(edge =>
+                        edge.roadId === roadId &&
+                        edge.to === road.to &&
+                        edge.reversed === false
+                    ).length;
+
+            if (forwardMatches !== 1) {
+                throw new Error(
+                    `Road forward adjacency mismatch: ${roadId}`,
+                );
+            }
+
+            const reverseMatches =
+                (this.adjacency.get(road.to) ?? [])
+                    .filter(edge =>
+                        edge.roadId === roadId &&
+                        edge.to === road.from &&
+                        edge.reversed === true
+                    ).length;
+
+            if (
+                reverseMatches !==
+                (road.bidirectional ? 1 : 0)
+            ) {
+                throw new Error(
+                    `Road reverse adjacency mismatch: ${roadId}`,
+                );
+            }
+
+            expectedAdjacencyEdges +=
+                road.bidirectional ? 2 : 1;
+
+            expectedMaxRoadHalfWidth =
+                Math.max(
+                    expectedMaxRoadHalfWidth,
+                    road.width / 2,
+                );
+
+            if (
+                road.enabled &&
+                from.componentId !==
+                    to.componentId
+            ) {
+                throw new Error(
+                    `Enabled road crosses components: ${roadId}`,
+                );
+            }
+        }
+
+        if (
+            diagnostics.adjacencyEdgeCount !==
+            expectedAdjacencyEdges
+        ) {
+            throw new Error(
+                `Adjacency edge count drift: ${diagnostics.adjacencyEdgeCount} edges for expected ${expectedAdjacencyEdges}`,
+            );
+        }
+
+        for (const [nodeId, edges] of this.adjacency) {
+            if (!this.nodes.has(nodeId)) {
+                throw new Error(
+                    `Adjacency contains stale node: ${nodeId}`,
+                );
+            }
+
+            let previousSignature = null;
+            const seen = new Set();
+
+            for (const edge of edges) {
+                const road =
+                    this.roads.get(edge.roadId);
+
+                if (!road) {
+                    throw new Error(
+                        `Adjacency references missing road: ${edge.roadId}`,
+                    );
+                }
+
+                const validForward =
+                    !edge.reversed &&
+                    road.from === nodeId &&
+                    road.to === edge.to;
+
+                const validReverse =
+                    edge.reversed &&
+                    road.bidirectional &&
+                    road.to === nodeId &&
+                    road.from === edge.to;
+
+                if (!validForward && !validReverse) {
+                    throw new Error(
+                        `Adjacency edge does not match road: ${edge.roadId}`,
+                    );
+                }
+
+                const signature =
+                    `${edge.roadId}|${edge.to}|${Number(edge.reversed)}`;
+
+                if (seen.has(signature)) {
+                    throw new Error(
+                        `Duplicate adjacency edge: ${nodeId} -> ${signature}`,
+                    );
+                }
+
+                seen.add(signature);
+
+                if (
+                    previousSignature != null &&
+                    previousSignature >
+                        signature
+                ) {
+                    throw new Error(
+                        `Adjacency order is not deterministic: ${nodeId}`,
+                    );
+                }
+
+                previousSignature = signature;
+            }
+        }
+
+        const componentSeen = new Set();
+        let componentNodeCount = 0;
+
+        for (
+            const [componentId, members] of
+            this.componentMembers
+        ) {
+            if (members.size === 0) {
+                throw new Error(
+                    `Empty component: ${componentId}`,
+                );
+            }
+
+            const memberList =
+                [...members].sort();
+
+            for (const nodeId of memberList) {
+                if (componentSeen.has(nodeId)) {
+                    throw new Error(
+                        `Node appears in multiple components: ${nodeId}`,
+                    );
+                }
+
+                componentSeen.add(nodeId);
+                componentNodeCount++;
+
+                const node =
+                    this.nodes.get(nodeId);
+
+                if (!node) {
+                    throw new Error(
+                        `Component contains missing node: ${nodeId}`,
+                    );
+                }
+
+                if (
+                    node.componentId !==
+                    componentId
+                ) {
+                    throw new Error(
+                        `Component id mismatch for node: ${nodeId}`,
+                    );
+                }
+            }
+
+            const reachable =
+                new Set([memberList[0]]);
+            const queue = [memberList[0]];
+
+            for (
+                let index = 0;
+                index < queue.length;
+                index++
+            ) {
+                const current =
+                    queue[index];
+
+                for (const road of this.roads.values()) {
+                    if (!road.enabled) continue;
+
+                    let neighbor = null;
+
+                    if (road.from === current) {
+                        neighbor = road.to;
+                    } else if (road.to === current) {
+                        neighbor = road.from;
+                    }
+
+                    if (
+                        neighbor == null ||
+                        reachable.has(neighbor)
+                    ) {
+                        continue;
+                    }
+
+                    if (
+                        this.nodes.get(neighbor)
+                            ?.componentId !==
+                        componentId
+                    ) {
+                        continue;
+                    }
+
+                    reachable.add(neighbor);
+                    queue.push(neighbor);
+                }
+            }
+
+            if (
+                reachable.size !==
+                members.size
+            ) {
+                throw new Error(
+                    `Component is disconnected: ${componentId}`,
+                );
+            }
+        }
+
+        if (
+            componentNodeCount !==
+            this.nodes.size
+        ) {
+            throw new Error(
+                `Component coverage drift: ${componentNodeCount} component members for ${this.nodes.size} nodes`,
+            );
+        }
+
+        if (
+            Math.abs(
+                this.maxRoadHalfWidth -
+                expectedMaxRoadHalfWidth,
+            ) > EPSILON
+        ) {
+            throw new Error(
+                `maxRoadHalfWidth drift: ${this.maxRoadHalfWidth} vs expected ${expectedMaxRoadHalfWidth}`,
+            );
+        }
+
+        let cachedLegs = 0;
+
+        for (const [key, entry] of this.routeCache) {
+            const route = entry.route;
+            const start =
+                this.nodes.get(
+                    route.startNodeId,
+                );
+            const destination =
+                this.nodes.get(
+                    route.destinationNodeId,
+                );
+
+            if (!start || !destination) {
+                throw new Error(
+                    `Cached route references missing endpoint: ${key}`,
+                );
+            }
+
+            if (
+                start.componentId !==
+                    destination.componentId ||
+                entry.componentId !==
+                    start.componentId
+            ) {
+                throw new Error(
+                    `Cached route component mismatch: ${key}`,
+                );
+            }
+
+            for (const leg of route.legs) {
+                const road =
+                    this.roads.get(
+                        leg.roadId,
+                    );
+
+                if (!road) {
+                    throw new Error(
+                        `Cached route references missing road: ${leg.roadId}`,
+                    );
+                }
+
+                if (
+                    road.version !==
+                    leg.roadVersion
+                ) {
+                    throw new Error(
+                        `Cached route contains stale road version: ${leg.roadId}`,
+                    );
+                }
+            }
+
+            cachedLegs +=
+                route.legs.length;
+        }
+
+        if (
+            cachedLegs !==
+            this.routeCacheLegCount
+        ) {
+            throw new Error(
+                `Route cache leg count drift: ${this.routeCacheLegCount} vs actual ${cachedLegs}`,
+            );
+        }
+
+        if (
+            this.routeCache.size >
+            this.routeCacheSize
+        ) {
+            throw new Error(
+                "Route cache exceeds route count bound",
+            );
+        }
+
+        if (
+            this.routeCacheLegCount >
+            this.routeCacheMaxTotalLegs
+        ) {
+            throw new Error(
+                "Route cache exceeds leg count bound",
+            );
+        }
+
+        return diagnostics;
+    }
+
     findRoute(
         startNodeId,
         destinationNodeId,
