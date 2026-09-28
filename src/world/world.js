@@ -349,6 +349,16 @@ export class World {
                 options.counterflowStrength ?? 0.8,
             trafficSide:
                 options.trafficSide ?? "right",
+            obstacleLookahead:
+                options.obstacleLookahead ??
+                options.neighborRadius ??
+                2.5,
+            obstacleMargin:
+                options.obstacleMargin ?? 0.15,
+            obstacleStrength:
+                options.obstacleStrength ?? 1.2,
+            obstacleForwardPressure:
+                options.obstacleForwardPressure ?? 0.75,
             roadEdgeMargin:
                 options.roadEdgeMargin ?? 0.05,
             congestionThreshold:
@@ -397,6 +407,30 @@ export class World {
         ) {
             throw new Error(
                 "localSteering.trafficSide must be \"right\" or \"left\"",
+            );
+        }
+
+        if (!(config.obstacleLookahead >= 0)) {
+            throw new Error(
+                "localSteering.obstacleLookahead must be greater than or equal to 0",
+            );
+        }
+
+        if (!(config.obstacleMargin >= 0)) {
+            throw new Error(
+                "localSteering.obstacleMargin must be greater than or equal to 0",
+            );
+        }
+
+        if (!(config.obstacleStrength >= 0)) {
+            throw new Error(
+                "localSteering.obstacleStrength must be greater than or equal to 0",
+            );
+        }
+
+        if (!(config.obstacleForwardPressure >= 0)) {
+            throw new Error(
+                "localSteering.obstacleForwardPressure must be greater than or equal to 0",
             );
         }
 
