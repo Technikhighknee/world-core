@@ -10,6 +10,7 @@ The world stores actual entity coordinates. Navigation is a separate graph used 
 - Active movement is tracked separately from the full population.
 - Movement advances numeric `x/y` state without temporary Vec2/object allocations in the hot loop and commits each entity position at most once per processed movement update.
 - Movement LOD supports full-detail nearby movers and coarse scheduled updates for distant movers.
+- Optional local steering uses nearby spatial occupancy for lateral separation inside the road corridor and derives congestion speed penalties from actual local bodies rather than a precomputed road congestion flag.
 - Dynamic entity lookups use a spatial hash. World entities are indexed by center cell only; body radius is handled by query expansion plus exact distance checks, so large bodies remain query-correct without duplicating dynamic memberships across neighboring cells. Moving inside the same center cell does not rewrite hash buckets.
 - Normal cell coordinates use packed numeric keys instead of transient string keys, and singleton cells store the entity ID directly instead of allocating a Set.
 - Reusable spatial query buffers are available through `createSpatialQueryBuffer()` and the allocation-conscious `queryRadiusInto()`, `queryAabbInto()`, `querySegmentInto()`, and `queryCapsuleInto()` APIs.
@@ -75,3 +76,24 @@ Post-GC retention checkpoints are taken throughout the run. A steadily increasin
 ### Soak benchmark
 
 `npm run bench:soak` runs the churn workload for 5,000 ticks by default with 20,000 continuously maintained movers and heavier lifecycle churn. Environment variables prefixed with `BENCH_` and `CHURN_` can override workload sizes.
+
+
+## Local steering
+
+Local steering is disabled by default so large full-rate movement workloads keep the minimal centerline hot path.
+
+```js
+const world = new World({
+  localSteering: {
+    neighborRadius: 2.5,
+    separationGap: 0.1,
+    separationStrength: 0.75,
+    maxLateralSpeed: 0.8,
+    congestionThreshold: 1,
+    congestionStrength: 0.65,
+    minSpeedMultiplier: 0.2
+  }
+});
+```
+
+When enabled, moving entities query their local neighborhood, derive a lateral separation correction from body radii, clamp that correction to the usable road width, and derive a speed multiplier from local occupancy and forward pressure. Individual mobility definitions can opt out with `localSteering: false`.
