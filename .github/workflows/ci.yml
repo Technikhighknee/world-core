@@ -48,6 +48,14 @@ jobs:
           CHURN_MEMORY_SAMPLE_EVERY: 5
         run: npm run bench:churn
 
+      - name: Steering benchmark smoke
+        env:
+          STEERING_COUNTS: 50
+          STEERING_WARMUP_TICKS: 3
+          STEERING_TICKS: 8
+          STEERING_DELTA_SECONDS: 0.1
+        run: npm run bench:steering
+
       - name: Retention benchmark smoke
         env:
           CHURN_CITIES: 2
