@@ -21,3 +21,8 @@ export {
     deserializeWorldCore,
     WORLD_CORE_SNAPSHOT_VERSION,
 } from "./world/serialization.js";
+
+export {
+    computeWorldCoreStateHash,
+    computeWorldCoreStateHashes,
+} from "./world/state-hash.js";
