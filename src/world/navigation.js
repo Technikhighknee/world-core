@@ -104,11 +104,26 @@ export class Navigation {
         routeCacheSize = 5000,
         routeCacheMaxLegs = 256,
         routeCacheMaxTotalLegs = 100000,
+        hierarchicalRouteCacheSize = 1000,
+        regionalRouteCacheSize = 5000,
     } = {}) {
         this.nodes = new Map();
         this.roads = new Map();
         this.adjacency = new Map();
         this.roadEffects = new Map();
+
+        this.regions = new Map();
+        this.hierarchicalRouteCacheSize =
+            hierarchicalRouteCacheSize;
+        this.regionalRouteCacheSize =
+            regionalRouteCacheSize;
+        this.hierarchicalRouteCache =
+            new Map();
+        this.regionalRouteCache =
+            new Map();
+        this.regionGatewayCache =
+            new Map();
+        this.hierarchyRevision = -1;
 
         this.nodeIndex = new StaticSpatialIndex(spatialCellSize);
         this.roadIndex = new StaticSpatialIndex(spatialCellSize);
@@ -130,6 +145,10 @@ export class Navigation {
 
     #touchGraph() {
         this.graphRevision++;
+        this.hierarchyRevision = -1;
+        this.hierarchicalRouteCache.clear();
+        this.regionalRouteCache.clear();
+        this.regionGatewayCache.clear();
     }
 
     #deleteCachedRoute(key) {
@@ -425,11 +444,200 @@ export class Navigation {
         this.routeCacheLegCount = 0;
     }
 
+    addRegion({ id }) {
+        if (
+            typeof id !== "string" ||
+            id.length === 0
+        ) {
+            throw new Error(
+                "Navigation region id must be a non-empty string",
+            );
+        }
+
+        if (this.regions.has(id)) {
+            throw new Error(
+                `Navigation region already exists: ${id}`,
+            );
+        }
+
+        const region = {
+            id,
+            nodeIds: new Set(),
+        };
+
+        this.regions.set(id, region);
+        this.#touchGraph();
+
+        return region;
+    }
+
+    removeRegion(regionId) {
+        const region =
+            this.regions.get(regionId);
+
+        if (!region) return false;
+
+        if (region.nodeIds.size > 0) {
+            throw new Error(
+                `Cannot remove non-empty navigation region: ${regionId}`,
+            );
+        }
+
+        this.regions.delete(regionId);
+        this.#touchGraph();
+        return true;
+    }
+
+    setNodeRegion(
+        nodeId,
+        regionId,
+    ) {
+        const node =
+            this.nodes.get(nodeId);
+
+        if (!node) {
+            throw new Error(
+                `Unknown node: ${nodeId}`,
+            );
+        }
+
+        if (
+            regionId !== null &&
+            regionId !== undefined &&
+            !this.regions.has(regionId)
+        ) {
+            throw new Error(
+                `Unknown navigation region: ${regionId}`,
+            );
+        }
+
+        const nextRegionId =
+            regionId ?? null;
+
+        if (
+            node.regionId ===
+            nextRegionId
+        ) {
+            return false;
+        }
+
+        if (node.regionId != null) {
+            this.regions
+                .get(node.regionId)
+                ?.nodeIds.delete(nodeId);
+        }
+
+        node.regionId =
+            nextRegionId;
+
+        if (nextRegionId != null) {
+            this.regions
+                .get(nextRegionId)
+                .nodeIds.add(nodeId);
+        }
+
+        this.#touchGraph();
+        return true;
+    }
+
+    #refreshRegionGateways() {
+        if (
+            this.hierarchyRevision ===
+            this.graphRevision
+        ) {
+            return;
+        }
+
+        this.regionGatewayCache.clear();
+
+        for (const regionId of this.regions.keys()) {
+            this.regionGatewayCache.set(
+                regionId,
+                new Set(),
+            );
+        }
+
+        for (const road of this.roads.values()) {
+            const from =
+                this.nodes.get(road.from);
+            const to =
+                this.nodes.get(road.to);
+
+            if (
+                !from ||
+                !to ||
+                from.regionId == null ||
+                to.regionId == null ||
+                from.regionId ===
+                    to.regionId
+            ) {
+                continue;
+            }
+
+            this.regionGatewayCache
+                .get(from.regionId)
+                ?.add(from.id);
+            this.regionGatewayCache
+                .get(to.regionId)
+                ?.add(to.id);
+        }
+
+        this.hierarchyRevision =
+            this.graphRevision;
+    }
+
+    getRegionGateways(regionId) {
+        if (!this.regions.has(regionId)) {
+            throw new Error(
+                `Unknown navigation region: ${regionId}`,
+            );
+        }
+
+        this.#refreshRegionGateways();
+
+        return [
+            ...(
+                this.regionGatewayCache
+                    .get(regionId) ??
+                []
+            ),
+        ]
+            .sort()
+            .map(nodeId =>
+                this.nodes.get(nodeId));
+    }
+
+    #setBoundedCache(
+        cache,
+        key,
+        value,
+        limit,
+    ) {
+        if (!(limit > 0)) {
+            return value;
+        }
+
+        if (cache.has(key)) {
+            cache.delete(key);
+        }
+
+        cache.set(key, value);
+
+        while (cache.size > limit) {
+            cache.delete(
+                cache.keys().next().value,
+            );
+        }
+
+        return value;
+    }
+
     addNode({
         id,
         x,
         y,
         junctionRadius = 0,
+        regionId = null,
     }) {
         if (
             typeof id !== "string" ||
@@ -452,11 +660,21 @@ export class Navigation {
             );
         }
 
+        if (
+            regionId !== null &&
+            !this.regions.has(regionId)
+        ) {
+            throw new Error(
+                `Unknown navigation region: ${regionId}`,
+            );
+        }
+
         const componentId = this.nextComponentId++;
         const node = {
             id,
             position: { x, y },
             junctionRadius,
+            regionId,
             componentId,
         };
 
@@ -467,6 +685,13 @@ export class Navigation {
             new Set([id]),
         );
         this.nodeIndex.insertPoint(id, node.position);
+
+        if (regionId != null) {
+            this.regions
+                .get(regionId)
+                .nodeIds.add(id);
+        }
+
         this.#touchGraph();
 
         return node;
@@ -523,6 +748,13 @@ export class Navigation {
 
         this.nodeIndex.remove(nodeId);
         this.adjacency.delete(nodeId);
+
+        if (node.regionId != null) {
+            this.regions
+                .get(node.regionId)
+                ?.nodeIds.delete(nodeId);
+        }
+
         this.nodes.delete(nodeId);
 
         this.#recalculateMaxRoadHalfWidth();
@@ -1648,6 +1880,32 @@ export class Navigation {
         return {
             nodeCount: this.nodes.size,
             roadCount: this.roads.size,
+            regionCount:
+                this.regions.size,
+            regionAssignedNodes:
+                [...this.regions.values()]
+                    .reduce(
+                        (sum, region) =>
+                            sum +
+                            region.nodeIds.size,
+                        0,
+                    ),
+            regionGatewayCount:
+                (() => {
+                    this.#refreshRegionGateways();
+                    return [
+                        ...this.regionGatewayCache.values(),
+                    ].reduce(
+                        (sum, gateways) =>
+                            sum +
+                            gateways.size,
+                        0,
+                    );
+                })(),
+            hierarchicalRouteCacheSize:
+                this.hierarchicalRouteCache.size,
+            regionalRouteCacheSize:
+                this.regionalRouteCache.size,
             roadEffectRoadCount:
                 this.roadEffects.size,
             roadEffectCount:
@@ -1721,6 +1979,28 @@ export class Navigation {
         let expectedAdjacencyEdges = 0;
 
         for (const [nodeId, node] of this.nodes) {
+            if (
+                node.regionId != null &&
+                !this.regions.has(
+                    node.regionId,
+                )
+            ) {
+                throw new Error(
+                    `Node references missing navigation region: ${nodeId}`,
+                );
+            }
+
+            if (
+                node.regionId != null &&
+                !this.regions
+                    .get(node.regionId)
+                    .nodeIds.has(nodeId)
+            ) {
+                throw new Error(
+                    `Region membership mismatch for node: ${nodeId}`,
+                );
+            }
+
             if (!(node.junctionRadius >= 0)) {
                 throw new Error(
                     `Node has invalid junction radius: ${nodeId}`,
@@ -1748,6 +2028,59 @@ export class Navigation {
                 throw new Error(
                     `Node component membership mismatch: ${nodeId}`,
                 );
+            }
+        }
+
+        const regionSeen =
+            new Set();
+
+        for (
+            const [regionId, region] of
+            this.regions
+        ) {
+            if (
+                region.id !== regionId
+            ) {
+                throw new Error(
+                    `Navigation region id mismatch: ${regionId}`,
+                );
+            }
+
+            for (
+                const nodeId of
+                region.nodeIds
+            ) {
+                if (
+                    regionSeen.has(
+                        nodeId,
+                    )
+                ) {
+                    throw new Error(
+                        `Node belongs to multiple navigation regions: ${nodeId}`,
+                    );
+                }
+
+                regionSeen.add(nodeId);
+
+                const node =
+                    this.nodes.get(
+                        nodeId,
+                    );
+
+                if (!node) {
+                    throw new Error(
+                        `Navigation region contains missing node: ${nodeId}`,
+                    );
+                }
+
+                if (
+                    node.regionId !==
+                    regionId
+                ) {
+                    throw new Error(
+                        `Navigation region membership mismatch: ${nodeId}`,
+                    );
+                }
             }
         }
 
@@ -2174,7 +2507,691 @@ export class Navigation {
             );
         }
 
+        if (
+            this.hierarchicalRouteCache.size >
+            this.hierarchicalRouteCacheSize
+        ) {
+            throw new Error(
+                "Hierarchical route cache exceeds route count bound",
+            );
+        }
+
+        if (
+            this.regionalRouteCache.size >
+            this.regionalRouteCacheSize
+        ) {
+            throw new Error(
+                "Regional route cache exceeds route count bound",
+            );
+        }
+
         return diagnostics;
+    }
+
+    #findRouteWithinRegion(
+        startNodeId,
+        destinationNodeId,
+        mobility,
+        regionId,
+    ) {
+        const start =
+            this.nodes.get(startNodeId);
+        const destination =
+            this.nodes.get(
+                destinationNodeId,
+            );
+
+        if (
+            !start ||
+            !destination ||
+            start.regionId !== regionId ||
+            destination.regionId !==
+                regionId
+        ) {
+            return null;
+        }
+
+        if (startNodeId === destinationNodeId) {
+            return {
+                startNodeId,
+                destinationNodeId,
+                legs: [],
+                estimatedSeconds: 0,
+            };
+        }
+
+        const key =
+            `${regionId}|${startNodeId}|${destinationNodeId}|${mobilityCacheKey(mobility)}`;
+
+        const cached =
+            this.regionalRouteCache.get(key);
+
+        if (cached) {
+            this.regionalRouteCache.delete(key);
+            this.regionalRouteCache.set(
+                key,
+                cached,
+            );
+            return cached;
+        }
+
+        const fastestPossibleSpeed =
+            maxTravelSpeed(mobility);
+
+        if (!(fastestPossibleSpeed > 0)) {
+            return null;
+        }
+
+        const queue =
+            new MinPriorityQueue();
+        const costs =
+            new Map([[startNodeId, 0]]);
+        const previous =
+            new Map();
+
+        queue.push(
+            startNodeId,
+            distance(
+                start.position,
+                destination.position,
+            ) /
+                fastestPossibleSpeed,
+            startNodeId,
+        );
+
+        while (queue.size > 0) {
+            const currentEntry =
+                queue.pop();
+            const current =
+                currentEntry.value;
+            const currentCost =
+                costs.get(current);
+
+            if (currentCost == null) {
+                continue;
+            }
+
+            if (
+                current ===
+                destinationNodeId
+            ) {
+                break;
+            }
+
+            const currentNode =
+                this.nodes.get(current);
+
+            const expectedPriority =
+                currentCost +
+                distance(
+                    currentNode.position,
+                    destination.position,
+                ) /
+                    fastestPossibleSpeed;
+
+            if (
+                currentEntry.priority >
+                expectedPriority +
+                    EPSILON
+            ) {
+                continue;
+            }
+
+            for (
+                const edge of
+                this.adjacency.get(
+                    current,
+                ) ?? []
+            ) {
+                const nextNode =
+                    this.nodes.get(
+                        edge.to,
+                    );
+                const road =
+                    this.roads.get(
+                        edge.roadId,
+                    );
+
+                if (
+                    !nextNode ||
+                    nextNode.regionId !==
+                        regionId ||
+                    !road ||
+                    !this.canTraverseRoad(
+                        road,
+                        mobility,
+                    )
+                ) {
+                    continue;
+                }
+
+                const roadFrom =
+                    this.nodes.get(
+                        road.from,
+                    );
+                const roadTo =
+                    this.nodes.get(
+                        road.to,
+                    );
+
+                if (
+                    roadFrom?.regionId !==
+                        regionId ||
+                    roadTo?.regionId !==
+                        regionId
+                ) {
+                    continue;
+                }
+
+                const speed =
+                    roadSurfaceSpeed(
+                        road,
+                        mobility,
+                    );
+
+                const nextCost =
+                    currentCost +
+                    road.length /
+                        speed *
+                        this.roadCostMultiplier(
+                            road,
+                        );
+
+                const knownCost =
+                    costs.get(edge.to) ??
+                    Infinity;
+                const previousStep =
+                    previous.get(edge.to);
+
+                const lexicallyBetter =
+                    Math.abs(
+                        nextCost -
+                            knownCost,
+                    ) <= EPSILON &&
+                    (
+                        !previousStep ||
+                        road.id <
+                            previousStep.roadId
+                    );
+
+                if (
+                    nextCost >
+                        knownCost +
+                            EPSILON ||
+                    (
+                        Math.abs(
+                            nextCost -
+                                knownCost,
+                        ) <= EPSILON &&
+                        !lexicallyBetter
+                    )
+                ) {
+                    continue;
+                }
+
+                costs.set(
+                    edge.to,
+                    nextCost,
+                );
+                previous.set(
+                    edge.to,
+                    {
+                        previousNode:
+                            current,
+                        roadId:
+                            edge.roadId,
+                        reversed:
+                            edge.reversed,
+                        roadVersion:
+                            road.version,
+                    },
+                );
+
+                const heuristic =
+                    distance(
+                        nextNode.position,
+                        destination.position,
+                    ) /
+                    fastestPossibleSpeed;
+
+                queue.push(
+                    edge.to,
+                    nextCost +
+                        heuristic,
+                    edge.to,
+                );
+            }
+        }
+
+        if (
+            !previous.has(
+                destinationNodeId,
+            )
+        ) {
+            return null;
+        }
+
+        const legs = [];
+        let nodeId =
+            destinationNodeId;
+
+        while (
+            nodeId !== startNodeId
+        ) {
+            const step =
+                previous.get(nodeId);
+
+            if (!step) return null;
+
+            legs.push({
+                roadId:
+                    step.roadId,
+                reversed:
+                    step.reversed,
+                roadVersion:
+                    step.roadVersion,
+            });
+
+            nodeId =
+                step.previousNode;
+        }
+
+        legs.reverse();
+
+        const route = {
+            startNodeId,
+            destinationNodeId,
+            legs,
+            estimatedSeconds:
+                costs.get(
+                    destinationNodeId,
+                ),
+        };
+
+        return this.#setBoundedCache(
+            this.regionalRouteCache,
+            key,
+            route,
+            this.regionalRouteCacheSize,
+        );
+    }
+
+    findHierarchicalRoute(
+        startNodeId,
+        destinationNodeId,
+        mobility,
+    ) {
+        const start =
+            this.nodes.get(startNodeId);
+        const destination =
+            this.nodes.get(
+                destinationNodeId,
+            );
+
+        if (!start) {
+            throw new Error(
+                `Unknown start node: ${startNodeId}`,
+            );
+        }
+
+        if (!destination) {
+            throw new Error(
+                `Unknown destination node: ${destinationNodeId}`,
+            );
+        }
+
+        if (
+            start.regionId == null ||
+            destination.regionId == null ||
+            start.regionId ===
+                destination.regionId
+        ) {
+            return this.findRoute(
+                startNodeId,
+                destinationNodeId,
+                mobility,
+            );
+        }
+
+        if (
+            start.componentId !==
+            destination.componentId
+        ) {
+            return null;
+        }
+
+        this.#refreshRegionGateways();
+
+        const cacheKey =
+            `${startNodeId}|${destinationNodeId}|${mobilityCacheKey(mobility)}`;
+        const cached =
+            this.hierarchicalRouteCache
+                .get(cacheKey);
+
+        if (cached) {
+            this.hierarchicalRouteCache
+                .delete(cacheKey);
+            this.hierarchicalRouteCache
+                .set(
+                    cacheKey,
+                    cached,
+                );
+            return cached;
+        }
+
+        const fastestPossibleSpeed =
+            maxTravelSpeed(mobility);
+
+        if (!(fastestPossibleSpeed > 0)) {
+            return null;
+        }
+
+        const queue =
+            new MinPriorityQueue();
+        const costs =
+            new Map([[startNodeId, 0]]);
+        const previous =
+            new Map();
+
+        queue.push(
+            startNodeId,
+            distance(
+                start.position,
+                destination.position,
+            ) /
+                fastestPossibleSpeed,
+            startNodeId,
+        );
+
+        while (queue.size > 0) {
+            const currentEntry =
+                queue.pop();
+            const currentId =
+                currentEntry.value;
+            const currentCost =
+                costs.get(currentId);
+
+            if (currentCost == null) {
+                continue;
+            }
+
+            if (
+                currentId ===
+                destinationNodeId
+            ) {
+                break;
+            }
+
+            const currentNode =
+                this.nodes.get(
+                    currentId,
+                );
+
+            const expectedPriority =
+                currentCost +
+                distance(
+                    currentNode.position,
+                    destination.position,
+                ) /
+                    fastestPossibleSpeed;
+
+            if (
+                currentEntry.priority >
+                expectedPriority +
+                    EPSILON
+            ) {
+                continue;
+            }
+
+            const localTargets =
+                new Set(
+                    this.regionGatewayCache
+                        .get(
+                            currentNode.regionId,
+                        ) ?? [],
+                );
+
+            if (
+                destination.regionId ===
+                currentNode.regionId
+            ) {
+                localTargets.add(
+                    destinationNodeId,
+                );
+            }
+
+            for (
+                const targetId of
+                [...localTargets].sort()
+            ) {
+                if (
+                    targetId ===
+                    currentId
+                ) {
+                    continue;
+                }
+
+                const localRoute =
+                    this.#findRouteWithinRegion(
+                        currentId,
+                        targetId,
+                        mobility,
+                        currentNode.regionId,
+                    );
+
+                if (!localRoute) {
+                    continue;
+                }
+
+                const nextCost =
+                    currentCost +
+                    localRoute.estimatedSeconds;
+                const knownCost =
+                    costs.get(targetId) ??
+                    Infinity;
+
+                if (
+                    nextCost >=
+                    knownCost -
+                        EPSILON
+                ) {
+                    continue;
+                }
+
+                costs.set(
+                    targetId,
+                    nextCost,
+                );
+                previous.set(
+                    targetId,
+                    {
+                        previousNode:
+                            currentId,
+                        type: "local",
+                        route:
+                            localRoute,
+                    },
+                );
+
+                const targetNode =
+                    this.nodes.get(
+                        targetId,
+                    );
+                const heuristic =
+                    distance(
+                        targetNode.position,
+                        destination.position,
+                    ) /
+                    fastestPossibleSpeed;
+
+                queue.push(
+                    targetId,
+                    nextCost +
+                        heuristic,
+                    targetId,
+                );
+            }
+
+            for (
+                const edge of
+                this.adjacency.get(
+                    currentId,
+                ) ?? []
+            ) {
+                const nextNode =
+                    this.nodes.get(
+                        edge.to,
+                    );
+                const road =
+                    this.roads.get(
+                        edge.roadId,
+                    );
+
+                if (
+                    !nextNode ||
+                    currentNode.regionId ==
+                        null ||
+                    nextNode.regionId ==
+                        null ||
+                    currentNode.regionId ===
+                        nextNode.regionId ||
+                    !road ||
+                    !this.canTraverseRoad(
+                        road,
+                        mobility,
+                    )
+                ) {
+                    continue;
+                }
+
+                const speed =
+                    roadSurfaceSpeed(
+                        road,
+                        mobility,
+                    );
+                const segmentCost =
+                    road.length /
+                    speed *
+                    this.roadCostMultiplier(
+                        road,
+                    );
+                const nextCost =
+                    currentCost +
+                    segmentCost;
+                const knownCost =
+                    costs.get(edge.to) ??
+                    Infinity;
+
+                if (
+                    nextCost >=
+                    knownCost -
+                        EPSILON
+                ) {
+                    continue;
+                }
+
+                costs.set(
+                    edge.to,
+                    nextCost,
+                );
+                previous.set(
+                    edge.to,
+                    {
+                        previousNode:
+                            currentId,
+                        type: "cross",
+                        leg: {
+                            roadId:
+                                road.id,
+                            reversed:
+                                edge.reversed,
+                            roadVersion:
+                                road.version,
+                        },
+                    },
+                );
+
+                const heuristic =
+                    distance(
+                        nextNode.position,
+                        destination.position,
+                    ) /
+                    fastestPossibleSpeed;
+
+                queue.push(
+                    edge.to,
+                    nextCost +
+                        heuristic,
+                    edge.to,
+                );
+            }
+        }
+
+        if (
+            !previous.has(
+                destinationNodeId,
+            )
+        ) {
+            return null;
+        }
+
+        const segments = [];
+        let nodeId =
+            destinationNodeId;
+
+        while (
+            nodeId !== startNodeId
+        ) {
+            const step =
+                previous.get(nodeId);
+
+            if (!step) return null;
+
+            segments.push(step);
+            nodeId =
+                step.previousNode;
+        }
+
+        segments.reverse();
+
+        const legs = [];
+
+        for (const segment of segments) {
+            if (
+                segment.type ===
+                "local"
+            ) {
+                for (
+                    const leg of
+                    segment.route.legs
+                ) {
+                    legs.push({
+                        ...leg,
+                    });
+                }
+            } else {
+                legs.push({
+                    ...segment.leg,
+                });
+            }
+        }
+
+        const route = {
+            startNodeId,
+            destinationNodeId,
+            legs,
+            estimatedSeconds:
+                costs.get(
+                    destinationNodeId,
+                ),
+        };
+
+        return this.#setBoundedCache(
+            this.hierarchicalRouteCache,
+            cacheKey,
+            route,
+            this.hierarchicalRouteCacheSize,
+        );
     }
 
     findRoute(
