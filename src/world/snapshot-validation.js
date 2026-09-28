@@ -510,6 +510,16 @@ export function validateWorldCoreSnapshot(
             },
         );
 
+    const roadByKey =
+        new Map(
+            roads.map(
+                road => [
+                    nodeKey(road.id),
+                    road,
+                ],
+            ),
+        );
+
     for (
         let index = 0;
         index < roads.length;
@@ -884,6 +894,75 @@ export function validateWorldCoreSnapshot(
                 1,
             );
         }
+
+        let currentNodeId =
+            route.startNodeId;
+
+        for (
+            let legIndex = 0;
+            legIndex < legs.length;
+            legIndex++
+        ) {
+            const leg = legs[legIndex];
+            const road =
+                roadByKey.get(
+                    nodeKey(leg.roadId),
+                );
+
+            if (!road) {
+                fail(
+                    `${path}.legs[${legIndex}].roadId`,
+                    "references missing road",
+                );
+            }
+
+            if (leg.reversed) {
+                if (!road.bidirectional) {
+                    fail(
+                        `${path}.legs[${legIndex}]`,
+                        "uses one-way road in reverse",
+                    );
+                }
+
+                if (
+                    nodeKey(road.to) !==
+                    nodeKey(currentNodeId)
+                ) {
+                    fail(
+                        `${path}.legs[${legIndex}]`,
+                        "route leg is not connected to previous leg",
+                    );
+                }
+
+                currentNodeId =
+                    road.from;
+            } else {
+                if (
+                    nodeKey(road.from) !==
+                    nodeKey(currentNodeId)
+                ) {
+                    fail(
+                        `${path}.legs[${legIndex}]`,
+                        "route leg is not connected to previous leg",
+                    );
+                }
+
+                currentNodeId =
+                    road.to;
+            }
+        }
+
+        if (
+            nodeKey(currentNodeId) !==
+            nodeKey(
+                route.destinationNodeId,
+            )
+        ) {
+            fail(
+                path,
+                "route does not end at destination node",
+            );
+        }
     }
 
     const entities =
@@ -925,6 +1004,8 @@ export function validateWorldCoreSnapshot(
             ),
         );
 
+    let journeyCount = 0;
+
     for (
         let index = 0;
         index <
@@ -962,6 +1043,8 @@ export function validateWorldCoreSnapshot(
             serialized.journey !==
             null
         ) {
+            journeyCount++;
+
             const journey =
                 requireObject(
                     serialized.journey,
@@ -1130,13 +1213,24 @@ export function validateWorldCoreSnapshot(
         );
     }
 
-    validateOrder(
-        snapshot.movingOrder,
-        "$.movingOrder",
-        {
-            requireJourney: true,
-        },
-    );
+    const movingOrder =
+        validateOrder(
+            snapshot.movingOrder,
+            "$.movingOrder",
+            {
+                requireJourney: true,
+            },
+        );
+
+    if (
+        movingOrder.size !==
+        journeyCount
+    ) {
+        fail(
+            "$.movingOrder",
+            "must contain every entity with an active journey exactly once",
+        );
+    }
 
     const accumulators =
         requireArray(
