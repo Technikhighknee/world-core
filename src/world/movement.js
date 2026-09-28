@@ -47,13 +47,21 @@ function beginJourney(world, navigation, entity, destinationNodeId, planned) {
         pointIndex: firstRoad
             ? initialPointIndex(firstRoad, firstLeg)
             : 0,
+        validatedGraphRevision:
+            navigation.graphRevision,
     };
 
     world.markMoving(entity.id);
     return true;
 }
 
-export function startJourney(world, navigation, entityId, destinationNodeId) {
+export function startJourney(
+    world,
+    navigation,
+    entityId,
+    destinationNodeId,
+    options = {},
+) {
     const entity = world.getEntity(entityId);
 
     if (!entity) {
@@ -68,6 +76,7 @@ export function startJourney(world, navigation, entityId, destinationNodeId) {
         entity.position,
         destinationNodeId,
         entity.mobility,
+        options,
     );
 
     if (!planned) return false;
@@ -81,8 +90,39 @@ export function startJourney(world, navigation, entityId, destinationNodeId) {
     );
 }
 
-export function rerouteJourney(world, navigation, entityId, destinationNodeId) {
-    return startJourney(world, navigation, entityId, destinationNodeId);
+export function rerouteJourney(
+    world,
+    navigation,
+    entityId,
+    destinationNodeId,
+    options = {},
+) {
+    const entity = world.getEntity(entityId);
+
+    if (!entity) {
+        throw new Error(`Unknown entity: ${entityId}`);
+    }
+
+    if (!entity.mobility) {
+        throw new Error(`Entity ${entityId} cannot move`);
+    }
+
+    const planned = navigation.findRouteFromPosition(
+        entity.position,
+        destinationNodeId,
+        entity.mobility,
+        options,
+    );
+
+    if (!planned) return false;
+
+    return beginJourney(
+        world,
+        navigation,
+        entity,
+        destinationNodeId,
+        planned,
+    );
 }
 
 export function stopJourney(entity, world = null) {
@@ -111,6 +151,45 @@ export function updateMovement(world, navigation, deltaSeconds) {
                     continue;
                 }
 
+                const journey = entity.journey;
+
+                if (
+                    journey.validatedGraphRevision !==
+                    navigation.graphRevision
+                ) {
+                    const prefixCurrent =
+                        !journey.prefixLeg ||
+                        navigation.isRouteLegCurrent(
+                            journey.prefixLeg,
+                            entity.mobility,
+                        );
+
+                    const routeCurrent =
+                        navigation.isRouteCurrent(
+                            journey.route,
+                            entity.mobility,
+                            journey.legIndex,
+                        );
+
+                    if (
+                        !prefixCurrent ||
+                        !routeCurrent
+                    ) {
+                        if (
+                            !replanInvalidJourney(
+                                world,
+                                navigation,
+                                entity,
+                            )
+                        ) {
+                            continue;
+                        }
+                    } else {
+                        journey.validatedGraphRevision =
+                            navigation.graphRevision;
+                    }
+                }
+
                 moveEntity(world, navigation, entity, elapsedSeconds);
 
                 if (
@@ -136,6 +215,68 @@ export function updateMovement(world, navigation, deltaSeconds) {
 function finishJourney(world, entity) {
     entity.journey = null;
     world.unmarkMoving(entity.id);
+}
+
+function invalidateJourney(world, entity, reason) {
+    const destinationNodeId =
+        entity.journey?.destinationNodeId ?? null;
+
+    entity.journey = null;
+    entity.lastJourneyFailure = {
+        destinationNodeId,
+        reason,
+        time: world.time,
+    };
+
+    world.unmarkMoving(entity.id);
+}
+
+function replanInvalidJourney(
+    world,
+    navigation,
+    entity,
+) {
+    const destinationNodeId =
+        entity.journey?.destinationNodeId;
+
+    if (!destinationNodeId) {
+        invalidateJourney(
+            world,
+            entity,
+            "missing-destination",
+        );
+        return false;
+    }
+
+    const entryMaxDistance =
+        entity.mobility.navigationEntryMaxDistance ??
+        0;
+
+    const planned = navigation.findRouteFromPosition(
+        entity.position,
+        destinationNodeId,
+        entity.mobility,
+        { entryMaxDistance },
+    );
+
+    if (!planned) {
+        invalidateJourney(
+            world,
+            entity,
+            "route-invalidated",
+        );
+        return false;
+    }
+
+    beginJourney(
+        world,
+        navigation,
+        entity,
+        destinationNodeId,
+        planned,
+    );
+
+    return true;
 }
 
 function advanceLeg(world, navigation, entity, journey) {
@@ -238,10 +379,33 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             break;
         }
 
+        if (
+            !navigation.isRouteLegCurrent(
+                leg,
+                entity.mobility,
+            )
+        ) {
+            if (
+                !replanInvalidJourney(
+                    world,
+                    navigation,
+                    entity,
+                )
+            ) {
+                break;
+            }
+
+            continue;
+        }
+
         const road = navigation.roads.get(leg.roadId);
 
         if (!road) {
-            finishJourney(world, entity);
+            invalidateJourney(
+                world,
+                entity,
+                "road-missing",
+            );
             break;
         }
 
