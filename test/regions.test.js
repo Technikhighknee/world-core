@@ -473,7 +473,7 @@ test("simulation region movement intervals drive scheduler detail without distan
     );
 });
 
-test("snapshot v3 preserves navigation hierarchy and simulation regions", () => {
+test("snapshot v1 preserves navigation hierarchy and simulation regions", () => {
     const navigation =
         buildRegionalNavigation();
 
@@ -515,11 +515,11 @@ test("snapshot v3 preserves navigation hierarchy and simulation regions", () => 
 
     assert.equal(
         snapshot.version,
-        3,
+        1,
     );
     assert.equal(
         WORLD_CORE_SNAPSHOT_VERSION,
-        3,
+        1,
     );
 
     const restored =

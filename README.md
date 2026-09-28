@@ -197,7 +197,7 @@ navigation.setRoadEffect(
 );
 ```
 
-Road effects invalidate cached/current routes through road versioning, so active journeys automatically replan when the temporary state changes. Junction radii, obstacles and road effects are included in snapshot format version 2.
+Road effects invalidate cached/current routes through road versioning, so active journeys automatically replan when the temporary state changes. Junction radii, obstacles and road effects are included in the current internal snapshot format.
 
 
 ## Fuzzing, determinism and state hashes
@@ -337,4 +337,4 @@ const world = new World({
 
 Overlapping simulation regions resolve deterministically by higher priority, then smaller area, then region ID. A region's `movementInterval` feeds directly into the existing movement scheduler; `null` falls back to distance LOD and `0` means full-rate movement. Consumers can query `simulationRegionAt(position)` or `getEntitySimulationRegion(id)` for their own AI/economy detail policies.
 
-Navigation regions and world simulation regions are intentionally separate layers. A consumer may use the same IDs for both, but the core does not force graph partitions to match spatial simulation policy. Both are persisted in snapshot format version 3.
+Navigation regions and world simulation regions are intentionally separate layers. A consumer may use the same IDs for both, but the core does not force graph partitions to match spatial simulation policy. Both are persisted in the current internal snapshot format. Until world-core has real savegame consumers, that format remains v1 and may evolve without compatibility guarantees.

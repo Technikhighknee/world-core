@@ -8,7 +8,7 @@ import {
 } from "./snapshot-validation.js";
 
 const FORMAT = "world-core";
-const FORMAT_VERSION = 3;
+const FORMAT_VERSION = 1;
 
 function clone(value) {
     return value == null
