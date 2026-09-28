@@ -668,6 +668,22 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
                 journey.pointIndex,
                 leg.reversed,
             );
+
+            if (
+                pointIndexIsDone(
+                    journey.pointIndex,
+                    road,
+                    leg.reversed,
+                )
+            ) {
+                advanceLeg(
+                    world,
+                    navigation,
+                    entity,
+                    journey,
+                );
+            }
+
             continue;
         }
 
