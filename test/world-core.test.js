@@ -2127,7 +2127,7 @@ test("navigation consistency diagnostics detect adjacency corruption", () => {
     assert.throws(
         () =>
             navigation.assertInternalConsistency(),
-        /Adjacency edge count drift|Duplicate adjacency edge/,
+        /Road forward adjacency mismatch|Adjacency edge count drift|Duplicate adjacency edge/,
     );
 });
 
