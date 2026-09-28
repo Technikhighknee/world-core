@@ -26,11 +26,16 @@
   "license": "ISC",
   "type": "module",
   "exports": {
-    ".": "./src/index.js",
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js",
+      "default": "./src/index.js"
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,
   "engines": {
     "node": ">=22"
-  }
+  },
+  "types": "./src/index.d.ts"
 }
