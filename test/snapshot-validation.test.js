@@ -285,3 +285,22 @@ test("snapshot validation rejects disconnected route legs and incomplete moving 
         /must contain every entity with an active journey exactly once/,
     );
 });
+
+
+test("snapshot validation rejects invalid event queue configuration", () => {
+    expectInvalid(
+        snapshot => {
+            snapshot.world.eventQueueLimit =
+                -1;
+        },
+        /expected integer >= 0/,
+    );
+
+    expectInvalid(
+        snapshot => {
+            snapshot.world.eventOverflowPolicy =
+                "unbounded";
+        },
+        /unsupported event overflow policy/,
+    );
+});
