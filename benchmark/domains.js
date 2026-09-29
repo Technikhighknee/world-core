@@ -4,6 +4,7 @@ import {
     Navigation,
     NavigationRegistry,
     World,
+    stepSimulation,
 } from "../src/index.js";
 
 const domainCount =
@@ -23,6 +24,11 @@ const overrideCount =
             process.env.DOMAIN_BENCH_OVERRIDES ??
             1_000,
         ),
+    );
+const emptyTickCount =
+    Number(
+        process.env.DOMAIN_BENCH_EMPTY_TICKS ??
+        10_000,
     );
 
 function forceGc() {
@@ -140,6 +146,25 @@ forceGc();
 const afterOverrides =
     process.memoryUsage();
 
+const emptyTickStarted =
+    performance.now();
+
+for (
+    let index = 0;
+    index < emptyTickCount;
+    index++
+) {
+    stepSimulation(
+        world,
+        registry,
+        0.05,
+    );
+}
+
+const emptyTickMs =
+    performance.now() -
+    emptyTickStarted;
+
 world.addEntity({
     id: "transfer-probe",
     position: {
@@ -252,6 +277,9 @@ console.log(
 );
 console.log(
     `${overrideCount.toLocaleString()} sparse navigation overrides: ${overrideMs.toFixed(2)} ms`,
+);
+console.log(
+    `${emptyTickCount.toLocaleString()} empty-world ticks across ${domainCount.toLocaleString()} domains: ${emptyTickMs.toFixed(2)} ms`,
 );
 console.log(
     `${transferCount.toLocaleString()} transfers: ${transferMs.toFixed(2)} ms`,
