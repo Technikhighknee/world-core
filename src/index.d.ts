@@ -129,35 +129,6 @@ export type NavigationEntry =
         road: Road;
     } & Omit<RoadHit, "road">);
 
-export interface MovementLodTier {
-    maxDistance: number;
-    interval: number;
-}
-
-export interface SimulationRegion {
-    id: string;
-    minX: number;
-    minY: number;
-    maxX: number;
-    maxY: number;
-    priority: number;
-    detailLevel: string;
-    movementInterval: number | null;
-    enabled: boolean;
-}
-
-export interface SimulationRegionInput {
-    id: string;
-    minX: number;
-    minY: number;
-    maxX: number;
-    maxY: number;
-    priority?: number;
-    detailLevel?: string;
-    movementInterval?: number | null;
-    enabled?: boolean;
-}
-
 export interface LocalSteeringOptions {
     enabled?: boolean;
     neighborRadius?: number;
@@ -199,9 +170,6 @@ export interface WorldDomain {
 export interface WorldOptions {
     spatialCellSize?: number;
     obstacleCellSize?: number;
-    movementLodTiers?: readonly MovementLodTier[] | null;
-    interestPoints?: readonly Vec2[];
-    simulationRegions?: readonly SimulationRegionInput[];
     domains?: readonly WorldDomainInput[];
     localSteering?: LocalSteeringOptions | null;
     captureEvents?: boolean;
@@ -280,9 +248,6 @@ export interface WorldDiagnostics {
     domainCount: number;
     occupiedSpatialDomainCount: number;
     movingEntities: number;
-    movementIntervalEntries: number;
-    movementBucketCount: number;
-    movementBucketMemberships: number;
     radiusTrackedEntities: number;
     radiusCountEntries: number;
     maxEntityRadius: number;
@@ -292,8 +257,6 @@ export interface WorldDiagnostics {
     eventQueueSize: number;
     eventQueueLimit: number;
     droppedEventCount: number;
-    simulationRegionCount: number;
-    scheduledSimulationRegionCount: number;
 }
 
 export const DEFAULT_WORLD_DOMAIN_ID: "default";
@@ -310,8 +273,6 @@ export class World<T extends Entity = Entity> {
     eventOverflowPolicy: EventOverflowPolicy;
     droppedEventCount: number;
     localSteering: LocalSteeringConfig | { enabled: false } | null;
-    interestPoints: Vec2[];
-    readonly simulationRegions: Map<string, SimulationRegion>;
 
     configureEventQueue(options?: {
         limit?: number;
@@ -374,25 +335,6 @@ export class World<T extends Entity = Entity> {
 
     configureLocalSteering(options?: LocalSteeringOptions): LocalSteeringConfig;
     disableLocalSteering(): void;
-
-    addSimulationRegion(
-        region: SimulationRegionInput,
-        options?: { refresh?: boolean },
-    ): SimulationRegion;
-    replaceSimulationRegion(
-        regionId: string,
-        patch: Partial<SimulationRegionInput>,
-    ): SimulationRegion;
-    removeSimulationRegion(regionId: string): boolean;
-    simulationRegionAt(position: Vec2): SimulationRegion | null;
-    getEntitySimulationRegion(entityId: EntityId): SimulationRegion | null;
-
-    configureMovementLod(tiers: readonly MovementLodTier[]): void;
-    setInterestPoints(points: readonly Vec2[]): void;
-    setMovementInterval(entityId: EntityId, interval: number): void;
-    clearMovementInterval(entityId: EntityId): void;
-    hasDynamicMovementLod(): boolean;
-    refreshAllMovementLod(): void;
 
     createSpatialQueryBuffer(): SpatialQueryBuffer<T>;
     queryRadiusInto(
