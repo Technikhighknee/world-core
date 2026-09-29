@@ -194,7 +194,7 @@ Movement emits deterministic lifecycle events for journey start, reroute, cancel
 
 ## Save / load
 
-`serializeWorldCore(world, navigation)` returns a JSON-safe versioned snapshot. `deserializeWorldCore(snapshot)` restores a fresh `World` and `Navigation` pair.
+`serializeWorldCore(world, navigation)` returns a JSON-safe versioned snapshot. `deserializeWorldCore(snapshot)` restores a fresh `World` plus either its `Navigation` or shared `NavigationRegistry`, matching the serialized root.
 
 Snapshots preserve dynamic road state and versions, world time, spatial domains, domain-scoped obstacles, entities, body state, mobility, active journeys, shared journey routes, shared navigation topology registries, bindings and sparse per-domain road effects. Route caches and pending movement events are intentionally transient and are not restored.
 
