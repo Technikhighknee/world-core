@@ -287,6 +287,7 @@ export interface WorldDiagnostics {
     maxEntityRadius: number;
     obstacleCount: number;
     obstacleIndexMemberships: number;
+    occupiedObstacleDomainCount: number;
     eventQueueSize: number;
     eventQueueLimit: number;
     droppedEventCount: number;
@@ -330,7 +331,12 @@ export class World<T extends Entity = Entity> {
     drainEvents(target?: WorldEvent[]): WorldEvent[];
     peekEvents(): WorldEvent[];
 
-    addObstacle(obstacle: Obstacle): Obstacle;
+    addObstacle(
+        obstacle: Obstacle,
+        options?: { domainId?: string },
+    ): Obstacle;
+    getObstacle(obstacleId: EntityId): Obstacle | undefined;
+    getObstacleDomain(obstacleId: EntityId): string | null;
     removeObstacle(obstacleId: EntityId): boolean;
     setObstacleEnabled(obstacleId: EntityId, enabled: boolean): boolean;
     replaceObstacle(obstacleId: EntityId, patch: Partial<Obstacle>): Obstacle;
