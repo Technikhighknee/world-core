@@ -1572,6 +1572,8 @@ export class World {
                 ),
             eventQueueSize:
                 this.events.length,
+            eventListenerCount:
+                this.eventListeners.size,
             eventQueueLimit:
                 this.eventQueueLimit,
             droppedEventCount:
