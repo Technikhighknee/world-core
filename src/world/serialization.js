@@ -266,6 +266,48 @@ function serializeNavigationSource(
                             topologyId,
                         }),
                     ),
+            domainRoadEffects:
+                [...navigation.domainInstances]
+                    .sort(
+                        ([a], [b]) =>
+                            a.localeCompare(b),
+                    )
+                    .flatMap(
+                        ([
+                            domainId,
+                            instance,
+                        ]) =>
+                            [...instance.roadEffects]
+                                .sort(
+                                    ([a], [b]) =>
+                                        a.localeCompare(b),
+                                )
+                                .flatMap(
+                                    ([
+                                        roadId,
+                                        effects,
+                                    ]) =>
+                                        [...effects]
+                                            .sort(
+                                                ([a], [b]) =>
+                                                    a.localeCompare(b),
+                                            )
+                                            .map(
+                                                ([
+                                                    effectId,
+                                                    effect,
+                                                ]) => ({
+                                                    domainId,
+                                                    roadId,
+                                                    effectId,
+                                                    blocked:
+                                                        effect.blocked,
+                                                    costMultiplier:
+                                                        effect.costMultiplier,
+                                                }),
+                                            ),
+                                ),
+                    ),
         };
     }
 
@@ -313,6 +355,23 @@ function deserializeNavigationSource(
         registry.bindDomain(
             binding.domainId,
             binding.topologyId,
+        );
+    }
+
+    for (
+        const effect of
+        data.domainRoadEffects ?? []
+    ) {
+        registry.setDomainRoadEffect(
+            effect.domainId,
+            effect.effectId,
+            effect.roadId,
+            {
+                blocked:
+                    effect.blocked,
+                costMultiplier:
+                    effect.costMultiplier,
+            },
         );
     }
 
@@ -600,6 +659,11 @@ function deserializeEntities(
                     );
                 }
             }
+
+            entityNavigation
+                .adoptRoute?.(
+                    routeRecord.route,
+                );
 
             stored.journey = {
                 ...clone(journeyRest),
