@@ -178,13 +178,13 @@ export interface WorldOptions {
 }
 
 export interface WorldEvent {
-    time: number;
-    type: string;
-    entityId?: EntityId;
-    roadId?: NavigationId;
-    destinationNodeId?: NavigationId | null;
-    reason?: string | null;
-    [key: string]: unknown;
+    readonly time: number;
+    readonly type: string;
+    readonly entityId?: EntityId;
+    readonly roadId?: NavigationId;
+    readonly destinationNodeId?: NavigationId | null;
+    readonly reason?: string | null;
+    readonly [key: string]: unknown;
 }
 
 export type WorldEventListener = (
