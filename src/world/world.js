@@ -469,6 +469,29 @@ export class World {
         }
     }
 
+    #assertEventCapacity(
+        additionalEvents,
+    ) {
+        if (
+            !this.captureEvents ||
+            this.eventOverflowPolicy !==
+                "throw" ||
+            additionalEvents <= 0
+        ) {
+            return;
+        }
+
+        if (
+            this.events.length +
+                additionalEvents >
+            this.eventQueueLimit
+        ) {
+            throw new Error(
+                `Event queue limit exceeded: ${this.eventQueueLimit}`,
+            );
+        }
+    }
+
     emitEvent(type, data = {}) {
         if (!this.captureEvents) return null;
 
@@ -886,6 +909,12 @@ export class World {
             x: entity.position.x,
             y: entity.position.y,
         };
+
+        this.#assertEventCapacity(
+            entity.journey
+                ? 2
+                : 1,
+        );
 
         try {
             entity.domainId =
