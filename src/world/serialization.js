@@ -2,7 +2,14 @@ import {
     MOBILITY_PROFILES,
 } from "./mobility-profiles.js";
 import { Navigation } from "./navigation.js";
-import { World } from "./world.js";
+import {
+    NavigationRegistry,
+    navigationForEntity,
+} from "./navigation-registry.js";
+import {
+    DEFAULT_WORLD_DOMAIN_ID,
+    World,
+} from "./world.js";
 import {
     validateWorldCoreSnapshot,
 } from "./snapshot-validation.js";
@@ -213,6 +220,106 @@ function deserializeNavigation(data) {
     return navigation;
 }
 
+function serializeNavigationSource(
+    navigation,
+) {
+    if (
+        navigation instanceof
+        NavigationRegistry
+    ) {
+        navigation.assertInternalConsistency();
+
+        return {
+            type: "registry",
+            defaultTopologyId:
+                navigation.defaultTopologyId,
+            topologies:
+                [...navigation.topologies]
+                    .sort(
+                        ([a], [b]) =>
+                            a.localeCompare(b),
+                    )
+                    .map(
+                        ([
+                            id,
+                            topology,
+                        ]) => ({
+                            id,
+                            navigation:
+                                serializeNavigation(
+                                    topology,
+                                ),
+                        }),
+                    ),
+            domainBindings:
+                [...navigation.domainBindings]
+                    .sort(
+                        ([a], [b]) =>
+                            a.localeCompare(b),
+                    )
+                    .map(
+                        ([
+                            domainId,
+                            topologyId,
+                        ]) => ({
+                            domainId,
+                            topologyId,
+                        }),
+                    ),
+        };
+    }
+
+    return serializeNavigation(
+        navigation,
+    );
+}
+
+function deserializeNavigationSource(
+    data,
+) {
+    if (data?.type !== "registry") {
+        return deserializeNavigation(
+            data,
+        );
+    }
+
+    const registry =
+        new NavigationRegistry();
+
+    for (
+        const topology of
+        data.topologies
+    ) {
+        registry.registerTopology(
+            topology.id,
+            deserializeNavigation(
+                topology.navigation,
+            ),
+        );
+    }
+
+    if (
+        data.defaultTopologyId != null
+    ) {
+        registry.setDefaultTopology(
+            data.defaultTopologyId,
+        );
+    }
+
+    for (
+        const binding of
+        data.domainBindings ?? []
+    ) {
+        registry.bindDomain(
+            binding.domainId,
+            binding.topologyId,
+        );
+    }
+
+    registry.assertInternalConsistency();
+    return registry;
+}
+
 function serializeLodTiers(world) {
     if (!world.movementLodTiers) return null;
 
@@ -272,17 +379,23 @@ function deserializeObstacles(
             {
                 domainId:
                     domainId ??
-                    "default",
+                    DEFAULT_WORLD_DOMAIN_ID,
             },
         );
     }
 }
 
-function serializeEntities(world) {
+function serializeEntities(
+    world,
+    navigation,
+) {
     const routeIds = new Map();
     const routes = [];
 
-    function registerRoute(route) {
+    function registerRoute(
+        route,
+        topologyId,
+    ) {
         let routeId = routeIds.get(route);
 
         if (routeId != null) {
@@ -294,6 +407,8 @@ function serializeEntities(world) {
 
         routes.push({
             id: routeId,
+            topologyId:
+                topologyId ?? null,
             startNodeId: route.startNodeId,
             destinationNodeId:
                 route.destinationNodeId,
@@ -328,10 +443,33 @@ function serializeEntities(world) {
                     ...journeyRest
                 } = journey;
 
+                const topologyId =
+                    navigation instanceof
+                    NavigationRegistry
+                        ? navigation
+                            .topologyIdForDomain(
+                                entity.domainId ??
+                                    DEFAULT_WORLD_DOMAIN_ID,
+                            )
+                        : null;
+
+                if (
+                    navigation instanceof
+                        NavigationRegistry &&
+                    topologyId == null
+                ) {
+                    throw new Error(
+                        `Cannot serialize active journey without navigation topology: ${String(entity.id)}`,
+                    );
+                }
+
                 serializedJourney = {
                     ...clone(journeyRest),
                     routeId:
-                        registerRoute(route),
+                        registerRoute(
+                            route,
+                            topologyId,
+                        ),
                 };
             }
 
@@ -361,17 +499,28 @@ function deserializeEntities(
     const routes = new Map();
 
     for (const routeData of data.routes) {
-        routes.set(routeData.id, {
-            startNodeId:
-                routeData.startNodeId,
-            destinationNodeId:
-                routeData.destinationNodeId,
-            legs: routeData.legs.map(
-                leg => ({ ...leg }),
-            ),
-            estimatedSeconds:
-                routeData.estimatedSeconds,
-        });
+        routes.set(
+            routeData.id,
+            {
+                topologyId:
+                    routeData.topologyId ??
+                    null,
+                route: {
+                    startNodeId:
+                        routeData.startNodeId,
+                    destinationNodeId:
+                        routeData.destinationNodeId,
+                    legs:
+                        routeData.legs.map(
+                            leg => ({
+                                ...leg,
+                            }),
+                        ),
+                    estimatedSeconds:
+                        routeData.estimatedSeconds,
+                },
+            },
+        );
     }
 
     const serializedById =
@@ -424,13 +573,13 @@ function deserializeEntities(
             world.addEntity(entity);
 
         if (serialized.journey) {
-            const route =
+            const routeRecord =
                 routes.get(
                     serialized.journey
                         .routeId,
                 );
 
-            if (!route) {
+            if (!routeRecord) {
                 throw new Error(
                     `Missing serialized route ${serialized.journey.routeId}`,
                 );
@@ -442,11 +591,39 @@ function deserializeEntities(
             } =
                 serialized.journey;
 
+            const entityNavigation =
+                navigationForEntity(
+                    navigation,
+                    stored,
+                );
+
+            if (
+                navigation instanceof
+                    NavigationRegistry
+            ) {
+                const expectedTopologyId =
+                    navigation
+                        .topologyIdForDomain(
+                            stored.domainId,
+                        );
+
+                if (
+                    routeRecord.topologyId !==
+                    expectedTopologyId
+                ) {
+                    throw new Error(
+                        `Serialized route topology mismatch for entity: ${String(stored.id)}`,
+                    );
+                }
+            }
+
             stored.journey = {
                 ...clone(journeyRest),
-                route,
+                route:
+                    routeRecord.route,
                 validatedGraphRevision:
-                    navigation.graphRevision,
+                    entityNavigation
+                        .graphRevision,
             };
 
             pendingJourneys.set(
@@ -501,14 +678,19 @@ export function serializeWorldCore(
     navigation,
 ) {
     const entityData =
-        serializeEntities(world);
+        serializeEntities(
+            world,
+            navigation,
+        );
 
     return {
         format: FORMAT,
         version: FORMAT_VERSION,
 
         navigation:
-            serializeNavigation(navigation),
+            serializeNavigationSource(
+                navigation,
+            ),
 
         world: {
             time: world.time,
@@ -578,7 +760,7 @@ export function deserializeWorldCore(
     );
 
     const navigation =
-        deserializeNavigation(
+        deserializeNavigationSource(
             snapshot.navigation,
         );
 
