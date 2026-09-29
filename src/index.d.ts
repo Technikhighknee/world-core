@@ -452,6 +452,38 @@ export class World<T extends Entity = Entity> {
     assertInternalConsistency(): WorldDiagnostics;
 }
 
+export interface NavigationRegistryDiagnostics {
+    topologyCount: number;
+    boundDomainCount: number;
+    referencedTopologyCount: number;
+    defaultTopologyId: string | null;
+}
+
+export class NavigationRegistry {
+    constructor(options?: {
+        defaultTopologyId?: string | null;
+    });
+
+    readonly topologies: Map<string, Navigation>;
+    readonly domainBindings: Map<string, string>;
+    defaultTopologyId: string | null;
+
+    registerTopology(id: string, navigation: Navigation): Navigation;
+    removeTopology(id: string): boolean;
+    setDefaultTopology(id: string): void;
+    bindDomain(domainId: string, topologyId: string): Navigation;
+    unbindDomain(domainId: string): boolean;
+    topologyIdForDomain(domainId?: string): string | null;
+    navigationForDomain(domainId?: string): Navigation | null;
+    navigationForEntity(entity: Entity): Navigation | null;
+    getDiagnostics(): NavigationRegistryDiagnostics;
+    assertInternalConsistency(): NavigationRegistryDiagnostics;
+}
+
+export type NavigationSource =
+    | Navigation
+    | NavigationRegistry;
+
 export interface NavigationOptions {
     spatialCellSize?: number;
     routeCacheSize?: number;
@@ -607,7 +639,7 @@ export interface JourneyStartOptions {
 
 export function startJourney(
     world: World,
-    navigation: Navigation,
+    navigation: NavigationSource,
     entityId: EntityId,
     destinationNodeId: NavigationId,
     options?: JourneyStartOptions,
@@ -615,7 +647,7 @@ export function startJourney(
 
 export function rerouteJourney(
     world: World,
-    navigation: Navigation,
+    navigation: NavigationSource,
     entityId: EntityId,
     destinationNodeId: NavigationId,
     options?: JourneyStartOptions,
@@ -629,13 +661,13 @@ export function stopJourney(
 export type SimulationSystem =
     (
         world: World,
-        navigation: Navigation,
+        navigation: NavigationSource,
         deltaSeconds: number,
     ) => void;
 
 export function stepSimulation(
     world: World,
-    navigation: Navigation,
+    navigation: NavigationSource,
     deltaSeconds: number,
     systems?: readonly SimulationSystem[],
 ): void;
