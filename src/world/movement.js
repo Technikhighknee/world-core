@@ -788,6 +788,11 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
     }
 
     if (moved) {
-        world.setEntityPositionXY(entity, x, y);
+        world.setEntityPositionXY(
+            entity,
+            x,
+            y,
+            false,
+        );
     }
 }
