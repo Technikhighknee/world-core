@@ -825,7 +825,22 @@ export function deserializeWorldCore(
     }
 
     world.events.length = 0;
-    navigation.invalidateAllRoutes();
+
+    if (
+        navigation instanceof
+        NavigationRegistry
+    ) {
+        for (
+            const topology of
+            navigation.topologies.values()
+        ) {
+            topology.invalidateAllRoutes();
+        }
+
+        navigation.assertInternalConsistency();
+    } else {
+        navigation.invalidateAllRoutes();
+    }
 
     world.assertInternalConsistency();
 
