@@ -1829,6 +1829,7 @@ test("sparse domain navigation overrides survive v1 snapshot round-trips", () =>
                 effectId: "locked",
                 blocked: true,
                 costMultiplier: 3,
+                traversalDelaySeconds: 0,
             },
         ],
     );
