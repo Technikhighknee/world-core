@@ -2,6 +2,9 @@ import {
     applyLocalSteering,
     createLocalSteeringContext,
 } from "./local-steering.js";
+import {
+    navigationForEntity,
+} from "./navigation-registry.js";
 
 const EPSILON = 0.000001;
 const EPSILON_SQUARED = EPSILON * EPSILON;
@@ -162,7 +165,13 @@ export function startJourney(
         throw new Error(`Entity ${entityId} cannot move`);
     }
 
-    const planned = navigation.findRouteFromPosition(
+    const entityNavigation =
+        navigationForEntity(
+            navigation,
+            entity,
+        );
+
+    const planned = entityNavigation.findRouteFromPosition(
         entity.position,
         destinationNodeId,
         entity.mobility,
@@ -173,7 +182,7 @@ export function startJourney(
 
     return beginJourney(
         world,
-        navigation,
+        entityNavigation,
         entity,
         destinationNodeId,
         planned,
@@ -198,7 +207,13 @@ export function rerouteJourney(
         throw new Error(`Entity ${entityId} cannot move`);
     }
 
-    const planned = navigation.findRouteFromPosition(
+    const entityNavigation =
+        navigationForEntity(
+            navigation,
+            entity,
+        );
+
+    const planned = entityNavigation.findRouteFromPosition(
         entity.position,
         destinationNodeId,
         entity.mobility,
@@ -209,7 +224,7 @@ export function rerouteJourney(
 
     return beginJourney(
         world,
-        navigation,
+        entityNavigation,
         entity,
         destinationNodeId,
         planned,
@@ -267,21 +282,26 @@ export function updateMovement(world, navigation, deltaSeconds) {
                     continue;
                 }
 
+                const entityNavigation =
+                    navigationForEntity(
+                        navigation,
+                        entity,
+                    );
                 const journey = entity.journey;
 
                 if (
                     journey.validatedGraphRevision !==
-                    navigation.graphRevision
+                    entityNavigation.graphRevision
                 ) {
                     const prefixCurrent =
                         !journey.prefixLeg ||
-                        navigation.isRouteLegCurrent(
+                        entityNavigation.isRouteLegCurrent(
                             journey.prefixLeg,
                             entity.mobility,
                         );
 
                     const routeCurrent =
-                        navigation.isRouteCurrent(
+                        entityNavigation.isRouteCurrent(
                             journey.route,
                             entity.mobility,
                             journey.legIndex,
@@ -294,7 +314,7 @@ export function updateMovement(world, navigation, deltaSeconds) {
                         if (
                             !replanInvalidJourney(
                                 world,
-                                navigation,
+                                entityNavigation,
                                 entity,
                             )
                         ) {
@@ -302,11 +322,16 @@ export function updateMovement(world, navigation, deltaSeconds) {
                         }
                     } else {
                         journey.validatedGraphRevision =
-                            navigation.graphRevision;
+                            entityNavigation.graphRevision;
                     }
                 }
 
-                moveEntity(world, navigation, entity, elapsedSeconds);
+                moveEntity(
+                    world,
+                    entityNavigation,
+                    entity,
+                    elapsedSeconds,
+                );
 
                 if (
                     refreshDynamicLod &&
