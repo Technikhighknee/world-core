@@ -1816,6 +1816,177 @@ export class Navigation {
         return best;
     }
 
+    findRouteToAny(
+        startNodeId,
+        destinationNodeIds,
+        mobility,
+        runtime = null,
+    ) {
+        const start = this.nodes.get(startNodeId);
+        if (!start) throw new Error(`Unknown start node: ${startNodeId}`);
+        if (!(mobility?.speed > 0)) return null;
+
+        const targets = [...new Set(destinationNodeIds ?? [])].sort();
+        if (targets.length === 0) return null;
+        for (const id of targets) {
+            if (!this.nodes.has(id)) throw new Error(`Unknown destination node: ${id}`);
+        }
+        const targetSet = new Set(targets);
+        if (targetSet.has(startNodeId)) {
+            return { startNodeId, destinationNodeId: startNodeId, legs: [], estimatedSeconds: 0 };
+        }
+
+        const queue = new MinPriorityQueue();
+        const costs = new Map([[startNodeId, 0]]);
+        const previous = new Map();
+        queue.push(startNodeId, 0, startNodeId);
+        let destinationNodeId = null;
+
+        while (queue.size > 0) {
+            const entry = queue.pop();
+            const current = entry.value;
+            const currentCost = costs.get(current);
+            if (currentCost == null || entry.priority > currentCost + EPSILON) continue;
+            if (targetSet.has(current)) {
+                destinationNodeId = current;
+                break;
+            }
+
+            for (const edge of this.adjacency.get(current) ?? []) {
+                const road = this.roads.get(edge.roadId);
+                if (!road || !this.canTraverseRoad(road, mobility, runtime)) continue;
+                const speed = roadSurfaceSpeed(road, mobility);
+                const nextCost = currentCost +
+                    road.length / speed * this.roadCostMultiplier(road, runtime);
+                const known = costs.get(edge.to) ?? Infinity;
+                const prev = previous.get(edge.to);
+                const lexical = Math.abs(nextCost-known) <= EPSILON &&
+                    (!prev || road.id < prev.roadId);
+                if (nextCost > known + EPSILON ||
+                    (Math.abs(nextCost-known) <= EPSILON && !lexical)) continue;
+                costs.set(edge.to, nextCost);
+                previous.set(edge.to, {
+                    previousNode: current,
+                    roadId: edge.roadId,
+                    reversed: edge.reversed,
+                    roadVersion: road.version,
+                });
+                queue.push(edge.to, nextCost, edge.to);
+            }
+        }
+
+        if (destinationNodeId == null) return null;
+        const legs = [];
+        let nodeId = destinationNodeId;
+        while (nodeId !== startNodeId) {
+            const step = previous.get(nodeId);
+            if (!step) return null;
+            legs.push({
+                roadId: step.roadId,
+                reversed: step.reversed,
+                roadVersion: step.roadVersion,
+            });
+            nodeId = step.previousNode;
+        }
+        legs.reverse();
+        return {
+            startNodeId,
+            destinationNodeId,
+            legs,
+            estimatedSeconds: costs.get(destinationNodeId),
+        };
+    }
+
+    findRouteFromPositionToAny(
+        position,
+        destinationNodeIds,
+        mobility,
+        {
+            nodeTolerance = 0.1,
+            roadTolerance = 0,
+            entryMaxDistance = 0,
+            maxEntryCandidates = 16,
+        } = {},
+        runtime = null,
+    ) {
+        const targets = [...new Set(destinationNodeIds ?? [])].sort();
+        if (targets.length === 0) return null;
+
+        const fromNode = this.nodeAt(position, nodeTolerance);
+        if (fromNode) {
+            const route = this.findRouteToAny(fromNode.id, targets, mobility, runtime);
+            if (route) return {
+                route,
+                prefixLeg: null,
+                entryPoint: null,
+                estimatedSeconds: route.estimatedSeconds,
+            };
+        }
+
+        const considerRoadHit = hit => {
+            if (!hit || !this.canTraverseRoad(hit.road, mobility, runtime)) return null;
+            const road = hit.road;
+            const speed = roadSurfaceSpeed(road, mobility);
+            if (!(speed > 0)) return null;
+            const entrySeconds = distance(position, hit.point) / mobility.speed;
+            let best = null;
+            const consider = (endpointNodeId, reversed, partialDistance) => {
+                const route = this.findRouteToAny(endpointNodeId, targets, mobility, runtime);
+                if (!route) return;
+                const partialSeconds = partialDistance / speed *
+                    this.roadCostMultiplier(road, runtime);
+                const total = entrySeconds + partialSeconds + route.estimatedSeconds;
+                const candidate = {
+                    route,
+                    prefixLeg: partialDistance > EPSILON ? {
+                        roadId: road.id,
+                        reversed,
+                        roadVersion: road.version,
+                        startSegmentIndex: hit.segmentIndex,
+                    } : null,
+                    entryPoint: distance(position, hit.point) > EPSILON ? { ...hit.point } : null,
+                    estimatedSeconds: total,
+                };
+                if (!best || total < best.estimatedSeconds ||
+                    (total === best.estimatedSeconds &&
+                     route.destinationNodeId < best.route.destinationNodeId)) best = candidate;
+            };
+            consider(road.to, false, road.length - hit.distanceAlong);
+            if (road.bidirectional) consider(road.from, true, hit.distanceAlong);
+            return best;
+        };
+
+        const hit = this.roadAt(position, roadTolerance, { includeDisabled: false });
+        const direct = considerRoadHit(hit);
+        if (direct) return direct;
+        if (!(entryMaxDistance > 0)) return null;
+
+        let best = null;
+        for (const entry of this.findNavigationEntries(
+            position, mobility,
+            { maxDistance: entryMaxDistance, maxEntries: maxEntryCandidates },
+            runtime,
+        )) {
+            let candidate = null;
+            if (entry.kind === "node") {
+                const route = this.findRouteToAny(entry.node.id, targets, mobility, runtime);
+                if (route) candidate = {
+                    route,
+                    prefixLeg: null,
+                    entryPoint: entry.distance > EPSILON ? { ...entry.node.position } : null,
+                    estimatedSeconds: entry.distance / mobility.speed + route.estimatedSeconds,
+                };
+            } else {
+                candidate = considerRoadHit(entry);
+            }
+            if (candidate && (!best ||
+                candidate.estimatedSeconds < best.estimatedSeconds ||
+                (candidate.estimatedSeconds === best.estimatedSeconds &&
+                 candidate.route.destinationNodeId < best.route.destinationNodeId))) best = candidate;
+        }
+        return best;
+    }
+
     findRouteFromPosition(
         position,
         destinationNodeId,
