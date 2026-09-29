@@ -213,7 +213,7 @@ const unsubscribe = world.subscribeEvents(
 unsubscribe();
 ```
 
-Observer callbacks are notifications only. Exceptions from an observer, or from its `onError` handler, are contained and cannot change simulation state or prevent other observers from receiving the event. Subscriptions are runtime-only and are not serialized.
+Observer callbacks are notifications only. Exceptions from an observer, or from its `onError` handler, are contained and cannot change simulation state or prevent other observers from receiving the event. Event envelopes are immutable, so one observer cannot rewrite data seen by another observer or by the capture queue. Subscriptions are runtime-only and are not serialized.
 
 Movement emits deterministic lifecycle events for journey start, reroute, cancellation, completion and failure, plus road entry/exit transitions. `drainEvents(target)` can reuse a caller-owned array.
 
