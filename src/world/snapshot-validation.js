@@ -1206,6 +1206,17 @@ export function validateWorldCoreSnapshot(
                 ],
             ),
         );
+    const entityIndexByKey =
+        new Map(
+            entities.map(
+                (serialized, index) => [
+                    nodeKey(
+                        serialized.entity.id,
+                    ),
+                    index,
+                ],
+            ),
+        );
 
     let journeyCount = 0;
 
@@ -1392,6 +1403,26 @@ export function validateWorldCoreSnapshot(
                 }
             }
 
+            if (
+                prefix &&
+                journey.legIndex !== 0
+            ) {
+                fail(
+                    `${path}.journey.legIndex`,
+                    "prefix leg requires legIndex 0",
+                );
+            }
+
+            if (
+                journey.entryPoint !== null &&
+                journey.legIndex !== 0
+            ) {
+                fail(
+                    `${path}.journey.legIndex`,
+                    "entry point requires legIndex 0",
+                );
+            }
+
             const currentLeg =
                 prefix ??
                 route.legs[
@@ -1401,7 +1432,11 @@ export function validateWorldCoreSnapshot(
 
             if (
                 !currentLeg &&
-                journey.entryPoint === null
+                !(
+                    journey.entryPoint !== null &&
+                    route.legs.length === 0 &&
+                    journey.legIndex === 0
+                )
             ) {
                 fail(
                     `${path}.journey`,
@@ -1609,7 +1644,7 @@ export function validateWorldCoreSnapshot(
         ) {
             requireNonNegative(
                 explicitInterval,
-                `$.entities[${entities.indexOf(serialized)}].entity.simulation.movementInterval`,
+                `$.entities[${entityIndexByKey.get(nodeKey(entityId))}].entity.simulation.movementInterval`,
             );
 
             if (explicitInterval > 0) {
