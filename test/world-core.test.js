@@ -431,8 +431,6 @@ test("world diagnostics detect and report consistent index membership", () => {
     assert.equal(diagnostics.entityCount, 2);
     assert.equal(diagnostics.spatialIndexedEntities, 2);
     assert.equal(diagnostics.movingEntities, 1);
-    assert.equal(diagnostics.movementIntervalEntries, 0);
-    assert.equal(diagnostics.movementBucketMemberships, 0);
     assert.equal(diagnostics.radiusTrackedEntities, 2);
 
     world.removeEntity("walker");
@@ -443,8 +441,6 @@ test("world diagnostics detect and report consistent index membership", () => {
     assert.equal(empty.entityCount, 0);
     assert.equal(empty.spatialIndexedEntities, 0);
     assert.equal(empty.movingEntities, 0);
-    assert.equal(empty.movementIntervalEntries, 0);
-    assert.equal(empty.movementBucketMemberships, 0);
     assert.equal(empty.radiusTrackedEntities, 0);
 });
 
@@ -1615,11 +1611,6 @@ test("world-core snapshots survive JSON round-trips and preserve dynamic navigat
     const world = new World({
         spatialCellSize: 12,
         captureEvents: true,
-        movementLodTiers: [
-            { maxDistance: 50, interval: 0 },
-            { maxDistance: Infinity, interval: 10 },
-        ],
-        interestPoints: [{ x: 0, y: 0 }],
         localSteering: {
             enabled: true,
             neighborRadius: 3,
@@ -1674,11 +1665,6 @@ test("world-core snapshots survive JSON round-trips and preserve dynamic navigat
     assert.equal(restored.navigation.routeCache.size, 0);
     assert.equal(restored.world.peekEvents().length, 0);
     assert.equal(restored.world.captureEvents, true);
-
-    assert.equal(
-        restored.world.movementLodTiers.at(-1).maxDistance,
-        Infinity,
-    );
 
     const restoredRoad =
         restored.navigation.roads.get("ab");
