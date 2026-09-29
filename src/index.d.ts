@@ -45,6 +45,7 @@ export interface Journey {
     entryPoint: Vec2 | null;
     legIndex: number;
     pointIndex: number;
+    roadDelayRemaining: number;
     validatedGraphRevision: number | string;
     roadEntered?: boolean;
 }
@@ -98,6 +99,7 @@ export interface Road {
 export interface RoadEffect {
     blocked: boolean;
     costMultiplier: number;
+    traversalDelaySeconds: number;
 }
 
 export interface RoutePlan {
@@ -437,6 +439,12 @@ export class NavigationInstance {
     ): boolean;
     clearRoadEffect(effectId: string): boolean;
     roadCostMultiplier(road: NavigationId | Road): number;
+    roadTraversalDelaySeconds(road: NavigationId | Road): number;
+    roadTravelSeconds(
+        road: NavigationId | Road,
+        mobility: Mobility,
+        distanceOverride?: number | null,
+    ): number;
     canTraverseRoad(
         road: NavigationId | Road,
         mobility: Mobility,
