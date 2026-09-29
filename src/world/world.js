@@ -41,6 +41,7 @@ export class World {
 
         this.captureEvents = Boolean(captureEvents);
         this.events = [];
+        this.eventListeners = new Set();
         this.eventQueueLimit = 0;
         this.eventOverflowPolicy = "drop-newest";
         this.droppedEventCount = 0;
@@ -397,22 +398,55 @@ export class World {
         }
     }
 
+    subscribeEvents(listener) {
+        if (typeof listener !== "function") {
+            throw new TypeError(
+                "World event listener must be a function",
+            );
+        }
+
+        this.eventListeners.add(listener);
+
+        let active = true;
+        return () => {
+            if (!active) return false;
+            active = false;
+            return this.eventListeners.delete(listener);
+        };
+    }
+
     emitEvent(type, data = {}) {
+        if (
+            this.captureEvents &&
+            this.eventOverflowPolicy ===
+                "throw" &&
+            (
+                this.eventQueueLimit === 0 ||
+                this.events.length >=
+                    this.eventQueueLimit
+            )
+        ) {
+            throw new Error(
+                `Event queue limit exceeded: ${this.eventQueueLimit}`,
+            );
+        }
+
+        const event = {
+            time: this.time,
+            type,
+            ...data,
+        };
+
+        for (const listener of [...this.eventListeners]) {
+            listener(event);
+        }
+
         if (!this.captureEvents) return null;
 
         if (
             this.events.length >=
             this.eventQueueLimit
         ) {
-            if (
-                this.eventOverflowPolicy ===
-                "throw"
-            ) {
-                throw new Error(
-                    `Event queue limit exceeded: ${this.eventQueueLimit}`,
-                );
-            }
-
             this.droppedEventCount++;
 
             if (
@@ -435,12 +469,6 @@ export class World {
             this.droppedEventCount++;
             return null;
         }
-
-        const event = {
-            time: this.time,
-            type,
-            ...data,
-        };
 
         this.events.push(event);
         return event;
