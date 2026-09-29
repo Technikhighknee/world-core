@@ -180,7 +180,12 @@ When enabled, moving entities query their local neighborhood, derive a lateral s
 
 ## Movement events
 
-Event capture is opt-in so the default high-volume movement path does not allocate event objects.
+World events have two separate delivery paths:
+
+- the bounded capture queue for retained diagnostics and later draining;
+- synchronous live observers for cross-system integration.
+
+Event capture is opt-in so the default high-volume movement path does not retain event objects.
 
 ```js
 const world = new World({ captureEvents: true });
@@ -189,6 +194,26 @@ const world = new World({ captureEvents: true });
 
 const events = world.drainEvents();
 ```
+
+Live observers do not require `captureEvents` and still receive events that a bounded queue drops:
+
+```js
+const unsubscribe = world.subscribeEvents(
+  event => {
+    // React immediately without polling drainEvents().
+  },
+  {
+    onError(error, event) {
+      // Optional observer-local error reporting.
+    }
+  }
+);
+
+// Later:
+unsubscribe();
+```
+
+Observer callbacks are notifications only. Exceptions from an observer, or from its `onError` handler, are contained and cannot change simulation state or prevent other observers from receiving the event. Event envelopes are immutable, so one observer cannot rewrite data seen by another observer or by the capture queue. Subscriptions are runtime-only and are not serialized.
 
 Movement emits deterministic lifecycle events for journey start, reroute, cancellation, completion and failure, plus road entry/exit transitions. `drainEvents(target)` can reuse a caller-owned array.
 
