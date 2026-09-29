@@ -994,3 +994,243 @@ test("shared navigation registry and active journeys round-trip without topology
     restored.navigation
         .assertInternalConsistency();
 });
+
+
+test("entity can walk across outdoor interior and cellar domains through explicit transfers", async () => {
+    const {
+        startJourney,
+        stepSimulation,
+    } = await import(
+        "../src/index.js"
+    );
+
+    const world =
+        new World({
+            captureEvents: true,
+        });
+    const registry =
+        new NavigationRegistry();
+
+    world.addDomain({
+        id: "tavern-ground",
+    });
+    world.addDomain({
+        id: "tavern-cellar",
+    });
+
+    const outside =
+        new Navigation();
+    outside.addNode({
+        id: "street",
+        x: 0,
+        y: 0,
+    });
+    outside.addNode({
+        id: "tavern-door",
+        x: 5,
+        y: 0,
+    });
+    outside.addRoad({
+        id: "street-to-door",
+        from: "street",
+        to: "tavern-door",
+    });
+
+    const ground =
+        new Navigation();
+    ground.addNode({
+        id: "inside-door",
+        x: 1,
+        y: 4,
+    });
+    ground.addNode({
+        id: "cellar-stairs",
+        x: 8,
+        y: 4,
+    });
+    ground.addRoad({
+        id: "taproom-crossing",
+        from: "inside-door",
+        to: "cellar-stairs",
+    });
+
+    const cellar =
+        new Navigation();
+    cellar.addNode({
+        id: "stairs-bottom",
+        x: 2,
+        y: 2,
+    });
+    cellar.addNode({
+        id: "brew-area",
+        x: 7,
+        y: 6,
+    });
+    cellar.addRoad({
+        id: "cellar-passage",
+        from: "stairs-bottom",
+        to: "brew-area",
+    });
+
+    registry.registerTopology(
+        "outdoors",
+        outside,
+    );
+    registry.registerTopology(
+        "tavern-ground-layout",
+        ground,
+    );
+    registry.registerTopology(
+        "tavern-cellar-layout",
+        cellar,
+    );
+    registry.bindDomain(
+        "tavern-ground",
+        "tavern-ground-layout",
+    );
+    registry.bindDomain(
+        "tavern-cellar",
+        "tavern-cellar-layout",
+    );
+
+    world.addEntity({
+        id: "hans",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 2,
+        },
+    });
+
+    assert.equal(
+        startJourney(
+            world,
+            registry,
+            "hans",
+            "tavern-door",
+        ),
+        true,
+    );
+
+    stepSimulation(
+        world,
+        registry,
+        3,
+    );
+
+    assert.equal(
+        world.getEntity(
+            "hans",
+        ).journey,
+        null,
+    );
+    assert.deepEqual(
+        world.getEntity(
+            "hans",
+        ).position,
+        {
+            x: 5,
+            y: 0,
+        },
+    );
+
+    world.transferEntity(
+        "hans",
+        {
+            domainId:
+                "tavern-ground",
+            position: {
+                x: 1,
+                y: 4,
+            },
+        },
+    );
+
+    assert.equal(
+        startJourney(
+            world,
+            registry,
+            "hans",
+            "cellar-stairs",
+        ),
+        true,
+    );
+
+    stepSimulation(
+        world,
+        registry,
+        4,
+    );
+
+    assert.equal(
+        world.getEntity(
+            "hans",
+        ).journey,
+        null,
+    );
+
+    world.transferEntity(
+        "hans",
+        {
+            domainId:
+                "tavern-cellar",
+            position: {
+                x: 2,
+                y: 2,
+            },
+        },
+    );
+
+    assert.equal(
+        startJourney(
+            world,
+            registry,
+            "hans",
+            "brew-area",
+        ),
+        true,
+    );
+
+    stepSimulation(
+        world,
+        registry,
+        4,
+    );
+
+    const hans =
+        world.getEntity("hans");
+
+    assert.equal(
+        hans.domainId,
+        "tavern-cellar",
+    );
+    assert.equal(
+        hans.journey,
+        null,
+    );
+    assert.deepEqual(
+        hans.position,
+        {
+            x: 7,
+            y: 6,
+        },
+    );
+
+    assert.deepEqual(
+        world.peekEvents()
+            .filter(event =>
+                event.type ===
+                "entityDomainTransferred")
+            .map(event =>
+                event.toDomainId),
+        [
+            "tavern-ground",
+            "tavern-cellar",
+        ],
+    );
+
+    world.assertInternalConsistency();
+    registry.assertInternalConsistency();
+});
