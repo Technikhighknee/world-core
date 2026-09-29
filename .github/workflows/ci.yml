@@ -83,6 +83,13 @@ jobs:
           DOMAIN_BENCH_TRANSFERS: 50000
         run: npm run bench:domains
 
+      - name: Distributed domain movement smoke
+        env:
+          DOMAIN_MOVE_MOVERS: 500
+          DOMAIN_MOVE_DOMAINS: 250
+          DOMAIN_MOVE_TICKS: 5
+        run: npm run bench:domain-movement
+
       - name: Retention benchmark smoke
         env:
           CHURN_CITIES: 2
