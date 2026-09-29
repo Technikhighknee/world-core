@@ -401,84 +401,55 @@ function validateMobility(
     );
 }
 
-export function validateWorldCoreSnapshot(
-    snapshot,
-    {
-        expectedFormat =
-            "world-core",
-        expectedVersion = 1,
-    } = {},
+function validateNavigationTopology(
+    value,
+    path,
 ) {
-    requireObject(
-        snapshot,
-        "$",
-    );
-
-    if (
-        snapshot.format !==
-        expectedFormat
-    ) {
-        fail(
-            "$.format",
-            `expected ${expectedFormat}`,
-        );
-    }
-
-    if (
-        snapshot.version !==
-        expectedVersion
-    ) {
-        fail(
-            "$.version",
-            `expected version ${expectedVersion}`,
-        );
-    }
-
     const navigation =
         requireObject(
-            snapshot.navigation,
-            "$.navigation",
+            value,
+            path,
         );
 
     requirePositive(
         navigation.spatialCellSize,
-        "$.navigation.spatialCellSize",
+        `${path}.spatialCellSize`,
     );
     requireInteger(
         navigation.routeCacheSize,
-        "$.navigation.routeCacheSize",
+        `${path}.routeCacheSize`,
     );
     requireInteger(
         navigation.routeCacheMaxLegs,
-        "$.navigation.routeCacheMaxLegs",
+        `${path}.routeCacheMaxLegs`,
     );
     requireInteger(
         navigation.routeCacheMaxTotalLegs,
-        "$.navigation.routeCacheMaxTotalLegs",
+        `${path}.routeCacheMaxTotalLegs`,
     );
     requireInteger(
         navigation.hierarchicalRouteCacheSize,
-        "$.navigation.hierarchicalRouteCacheSize",
+        `${path}.hierarchicalRouteCacheSize`,
     );
     requireInteger(
         navigation.regionalRouteCacheSize,
-        "$.navigation.regionalRouteCacheSize",
+        `${path}.regionalRouteCacheSize`,
     );
 
     const regions =
         requireArray(
             navigation.regions ?? [],
-            "$.navigation.regions",
+            `${path}.regions`,
         );
 
     const regionIds =
         requireUniqueIds(
             regions,
-            "$.navigation.regions",
+            `${path}.regions`,
             region => {
                 requireObject(
                     region,
-                    "$.navigation.regions[]",
+                    `${path}.regions[]`,
                 );
 
                 if (
@@ -487,7 +458,7 @@ export function validateWorldCoreSnapshot(
                     region.id.length === 0
                 ) {
                     fail(
-                        "$.navigation.regions[].id",
+                        `${path}.regions[].id`,
                         "expected non-empty string",
                     );
                 }
@@ -499,20 +470,20 @@ export function validateWorldCoreSnapshot(
     const nodes =
         requireArray(
             navigation.nodes,
-            "$.navigation.nodes",
+            `${path}.nodes`,
         );
     const nodeIds =
         requireUniqueIds(
             nodes,
-            "$.navigation.nodes",
+            `${path}.nodes`,
             node => {
                 requireObject(
                     node,
-                    "$.navigation.nodes[]",
+                    `${path}.nodes[]`,
                 );
                 return requireId(
                     node.id,
-                    "$.navigation.nodes[].id",
+                    `${path}.nodes[].id`,
                 );
             },
         );
@@ -563,20 +534,20 @@ export function validateWorldCoreSnapshot(
     const roads =
         requireArray(
             navigation.roads,
-            "$.navigation.roads",
+            `${path}.roads`,
         );
     const roadIds =
         requireUniqueIds(
             roads,
-            "$.navigation.roads",
+            `${path}.roads`,
             road => {
                 requireObject(
                     road,
-                    "$.navigation.roads[]",
+                    `${path}.roads[]`,
                 );
                 return requireId(
                     road.id,
-                    "$.navigation.roads[].id",
+                    `${path}.roads[].id`,
                 );
             },
         );
@@ -749,6 +720,213 @@ export function validateWorldCoreSnapshot(
             }
         }
 
+    }
+
+    return {
+        nodeIds,
+        roadIds,
+        roadByKey,
+        nodeKey,
+    };
+}
+
+export function validateWorldCoreSnapshot(
+    snapshot,
+    {
+        expectedFormat =
+            "world-core",
+        expectedVersion = 1,
+    } = {},
+) {
+    requireObject(
+        snapshot,
+        "$",
+    );
+
+    if (
+        snapshot.format !==
+        expectedFormat
+    ) {
+        fail(
+            "$.format",
+            `expected ${expectedFormat}`,
+        );
+    }
+
+    if (
+        snapshot.version !==
+        expectedVersion
+    ) {
+        fail(
+            "$.version",
+            `expected version ${expectedVersion}`,
+        );
+    }
+
+    const navigationSnapshot =
+        requireObject(
+            snapshot.navigation,
+            "$.navigation",
+        );
+
+    const navigationContexts =
+        new Map();
+    let navigationRegistry =
+        null;
+    let defaultNavigationContext =
+        null;
+
+    if (
+        navigationSnapshot.type ===
+        "registry"
+    ) {
+        navigationRegistry =
+            navigationSnapshot;
+
+        const topologies =
+            requireArray(
+                navigationRegistry.topologies,
+                "$.navigation.topologies",
+            );
+
+        requireUniqueIds(
+            topologies,
+            "$.navigation.topologies",
+            topology => {
+                requireObject(
+                    topology,
+                    "$.navigation.topologies[]",
+                );
+
+                if (
+                    typeof topology.id !==
+                        "string" ||
+                    topology.id.length ===
+                        0
+                ) {
+                    fail(
+                        "$.navigation.topologies[].id",
+                        "expected non-empty string",
+                    );
+                }
+
+                return topology.id;
+            },
+        );
+
+        for (
+            let index = 0;
+            index < topologies.length;
+            index++
+        ) {
+            const topology =
+                topologies[index];
+            const context =
+                validateNavigationTopology(
+                    topology.navigation,
+                    `$.navigation.topologies[${index}].navigation`,
+                );
+
+            navigationContexts.set(
+                topology.id,
+                context,
+            );
+        }
+
+        if (
+            navigationRegistry
+                .defaultTopologyId !==
+                null
+        ) {
+            if (
+                typeof navigationRegistry
+                    .defaultTopologyId !==
+                    "string" ||
+                !navigationContexts.has(
+                    navigationRegistry
+                        .defaultTopologyId,
+                )
+            ) {
+                fail(
+                    "$.navigation.defaultTopologyId",
+                    "references missing navigation topology",
+                );
+            }
+
+            defaultNavigationContext =
+                navigationContexts.get(
+                    navigationRegistry
+                        .defaultTopologyId,
+                );
+        }
+
+        const bindings =
+            requireArray(
+                navigationRegistry
+                    .domainBindings ?? [],
+                "$.navigation.domainBindings",
+            );
+
+        const seenBindings =
+            new Set();
+
+        for (
+            let index = 0;
+            index < bindings.length;
+            index++
+        ) {
+            const binding =
+                requireObject(
+                    bindings[index],
+                    `$.navigation.domainBindings[${index}]`,
+                );
+
+            if (
+                typeof binding.domainId !==
+                    "string" ||
+                binding.domainId.length ===
+                    0
+            ) {
+                fail(
+                    `$.navigation.domainBindings[${index}].domainId`,
+                    "expected non-empty string",
+                );
+            }
+
+            if (
+                seenBindings.has(
+                    binding.domainId,
+                )
+            ) {
+                fail(
+                    `$.navigation.domainBindings[${index}].domainId`,
+                    "duplicate domain binding",
+                );
+            }
+
+            seenBindings.add(
+                binding.domainId,
+            );
+
+            if (
+                typeof binding.topologyId !==
+                    "string" ||
+                !navigationContexts.has(
+                    binding.topologyId,
+                )
+            ) {
+                fail(
+                    `$.navigation.domainBindings[${index}].topologyId`,
+                    "references missing navigation topology",
+                );
+            }
+        }
+    } else {
+        defaultNavigationContext =
+            validateNavigationTopology(
+                navigationSnapshot,
+                "$.navigation",
+            );
     }
 
     const world =
