@@ -28,7 +28,7 @@ The world stores actual entity coordinates. Navigation is a separate graph used 
 - `World.entities` is the master entity registry.
 - Active movement is tracked separately from the full population.
 - Movement advances numeric `x/y` state without temporary Vec2/object allocations in the hot loop and commits each entity position at most once per processed movement update.
-- Movement LOD supports full-detail nearby movers and coarse scheduled updates for distant movers.
+- Active movers always advance with the simulation delta; detail and scheduling policy is intentionally external to world-core.
 - Optional local steering uses nearby spatial occupancy for lateral separation inside the road corridor and derives congestion speed penalties from actual local bodies rather than a precomputed road congestion flag.
 - Dynamic entity lookups use a spatial hash. World entities are indexed by center cell only; body radius is handled by query expansion plus exact distance checks, so large bodies remain query-correct without duplicating dynamic memberships across neighboring cells. Moving inside the same center cell does not rewrite hash buckets.
 - Normal cell coordinates use packed numeric keys instead of transient string keys, and singleton cells store the entity ID directly instead of allocating a Set.
