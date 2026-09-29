@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [master, fix/domain-road-effect-snapshot-test]
+    branches: [master]
   pull_request:
     branches: [master]
   workflow_dispatch:
