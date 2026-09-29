@@ -2,6 +2,7 @@ import {
     circleIntersectsAabb,
     distanceSquaredPointToSegment,
 } from "./geometry.js";
+import { distanceSquared } from "./vec2.js";
 import { DomainSpatialIndex } from "./domain-spatial-index.js";
 import { ObstacleField } from "./obstacle-field.js";
 
