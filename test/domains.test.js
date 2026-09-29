@@ -6,6 +6,7 @@ import {
     Navigation,
     NavigationRegistry,
     World,
+    computeWorldCoreStateHash,
     startJourney,
     stepSimulation,
     deserializeWorldCore,
@@ -2046,5 +2047,230 @@ test("snapshot validation rejects domain road overrides against the wrong topolo
                 snapshot,
             ),
         /missing road in bound navigation topology/,
+    );
+});
+
+test("domain navigation overrides participate in deterministic state hashes", () => {
+    const world = new World();
+    world.addDomain({
+        id: "house",
+    });
+
+    const topology =
+        buildSharedHouseTopology();
+    const registry =
+        new NavigationRegistry();
+
+    registry.registerTopology(
+        "layout",
+        topology,
+    );
+    registry.bindDomain(
+        "house",
+        "layout",
+    );
+
+    const before =
+        computeWorldCoreStateHash(
+            world,
+            registry,
+        );
+
+    registry.setDomainRoadEffect(
+        "house",
+        "locked",
+        "entrance-hall",
+        {
+            blocked: true,
+        },
+    );
+
+    const after =
+        computeWorldCoreStateHash(
+            world,
+            registry,
+        );
+
+    assert.notEqual(
+        before,
+        after,
+    );
+
+    const restored =
+        deserializeWorldCore(
+            structuredClone(
+                serializeWorldCore(
+                    world,
+                    registry,
+                ),
+            ),
+        );
+
+    assert.equal(
+        computeWorldCoreStateHash(
+            restored.world,
+            restored.navigation,
+        ),
+        after,
+    );
+});
+
+test("randomized sparse domain navigation override churn preserves invariants", () => {
+    const world = new World();
+    const topology =
+        buildSharedHouseTopology();
+    const registry =
+        new NavigationRegistry();
+
+    registry.registerTopology(
+        "layout",
+        topology,
+    );
+
+    const domainCount = 64;
+
+    for (
+        let index = 0;
+        index < domainCount;
+        index++
+    ) {
+        const domainId =
+            `house-${index}`;
+
+        world.addDomain({
+            id: domainId,
+        });
+        registry.bindDomain(
+            domainId,
+            "layout",
+        );
+    }
+
+    const roads = [
+        "entrance-hall",
+        "hall-bedroom",
+        "entrance-side",
+        "side-bedroom",
+    ];
+
+    let state = 0x51f15e;
+
+    const random = () => {
+        state =
+            (
+                Math.imul(
+                    state,
+                    1664525,
+                ) +
+                1013904223
+            ) >>> 0;
+
+        return state;
+    };
+
+    for (
+        let step = 0;
+        step < 1_000;
+        step++
+    ) {
+        const domainId =
+            `house-${random() %
+                domainCount}`;
+        const roadId =
+            roads[
+                random() %
+                roads.length
+            ];
+        const effectId =
+            `effect-${random() % 4}`;
+        const operation =
+            random() % 4;
+
+        if (operation <= 1) {
+            registry.setDomainRoadEffect(
+                domainId,
+                effectId,
+                roadId,
+                {
+                    blocked:
+                        operation === 0,
+                    costMultiplier:
+                        operation === 0
+                            ? 1
+                            : 1 +
+                                (
+                                    random() %
+                                    4
+                                ),
+                },
+            );
+        } else if (operation === 2) {
+            registry.removeDomainRoadEffect(
+                domainId,
+                effectId,
+                roadId,
+            );
+        } else {
+            registry.clearDomainRoadEffect(
+                domainId,
+                effectId,
+            );
+        }
+
+        if (step % 25 === 0) {
+            registry
+                .assertInternalConsistency();
+        }
+
+        if (step % 100 === 0) {
+            const snapshot =
+                serializeWorldCore(
+                    world,
+                    registry,
+                );
+
+            assert.equal(
+                validateWorldCoreSnapshot(
+                    snapshot,
+                ),
+                true,
+            );
+
+            const restored =
+                deserializeWorldCore(
+                    structuredClone(
+                        snapshot,
+                    ),
+                );
+
+            restored.navigation
+                .assertInternalConsistency();
+            restored.world
+                .assertInternalConsistency();
+
+            assert.equal(
+                computeWorldCoreStateHash(
+                    restored.world,
+                    restored.navigation,
+                ),
+                computeWorldCoreStateHash(
+                    world,
+                    registry,
+                ),
+            );
+        }
+    }
+
+    const diagnostics =
+        registry
+            .assertInternalConsistency();
+
+    assert.ok(
+        diagnostics.overriddenDomainCount <=
+            domainCount,
+    );
+    assert.ok(
+        diagnostics.overrideEffectCount >=
+            diagnostics.overriddenDomainCount,
     );
 });
