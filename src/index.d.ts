@@ -255,6 +255,7 @@ export interface WorldDiagnostics {
     obstacleIndexMemberships: number;
     occupiedObstacleDomainCount: number;
     eventQueueSize: number;
+    eventListenerCount: number;
     eventQueueLimit: number;
     droppedEventCount: number;
 }
@@ -289,6 +290,7 @@ export class World<T extends Entity = Entity> {
     };
     resetDroppedEventCount(): number;
     setEventCapture(enabled: boolean): void;
+    subscribeEvents(listener: (event: WorldEvent) => void): () => boolean;
     emitEvent(type: string, data?: Record<string, unknown>): WorldEvent | null;
     drainEvents(target?: WorldEvent[]): WorldEvent[];
     peekEvents(): WorldEvent[];
