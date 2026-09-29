@@ -660,3 +660,154 @@ test("shared topology mutation is visible to every bound domain", () => {
         );
     }
 });
+
+
+test("dynamic obstacles are isolated per domain and allocated sparsely", () => {
+    const world = new World();
+
+    world.addDomain({
+        id: "cellar-a",
+    });
+    world.addDomain({
+        id: "cellar-b",
+    });
+
+    world.addObstacle(
+        {
+            id: "barrel-a",
+            type: "circle",
+            center: {
+                x: 5,
+                y: 5,
+            },
+            radius: 1,
+        },
+        {
+            domainId:
+                "cellar-a",
+        },
+    );
+
+    assert.deepEqual(
+        world.queryObstaclesRadiusInto(
+            { x: 5, y: 5 },
+            2,
+            [],
+            {
+                domainId:
+                    "cellar-a",
+            },
+        ).map(obstacle =>
+            obstacle.id),
+        ["barrel-a"],
+    );
+
+    assert.deepEqual(
+        world.queryObstaclesRadiusInto(
+            { x: 5, y: 5 },
+            2,
+            [],
+            {
+                domainId:
+                    "cellar-b",
+            },
+        ),
+        [],
+    );
+
+    assert.deepEqual(
+        world.queryObstaclesRadiusInto(
+            { x: 5, y: 5 },
+            2,
+        ),
+        [],
+    );
+
+    assert.equal(
+        world.getDiagnostics()
+            .occupiedObstacleDomainCount,
+        1,
+    );
+
+    assert.equal(
+        world.removeObstacle(
+            "barrel-a",
+        ),
+        true,
+    );
+
+    assert.equal(
+        world.getDiagnostics()
+            .occupiedObstacleDomainCount,
+        0,
+    );
+
+    world.assertInternalConsistency();
+});
+
+test("obstacle domains survive v1 snapshot round-trip", () => {
+    const world = new World();
+    const navigation =
+        new Navigation();
+
+    world.addDomain({
+        id: "cellar",
+    });
+
+    world.addObstacle(
+        {
+            id: "barrel",
+            type: "aabb",
+            minX: 1,
+            minY: 2,
+            maxX: 3,
+            maxY: 4,
+        },
+        {
+            domainId:
+                "cellar",
+        },
+    );
+
+    const snapshot =
+        serializeWorldCore(
+            world,
+            navigation,
+        );
+
+    assert.equal(
+        snapshot.version,
+        1,
+    );
+    assert.equal(
+        snapshot.world
+            .obstacles[0]
+            .domainId,
+        "cellar",
+    );
+
+    const restored =
+        deserializeWorldCore(
+            snapshot,
+        ).world;
+
+    assert.equal(
+        restored.getObstacleDomain(
+            "barrel",
+        ),
+        "cellar",
+    );
+    assert.equal(
+        restored.queryObstaclesRadiusInto(
+            { x: 2, y: 3 },
+            2,
+            [],
+            {
+                domainId: "cellar",
+            },
+        )[0].id,
+        "barrel",
+    );
+
+    restored.assertInternalConsistency();
+});
