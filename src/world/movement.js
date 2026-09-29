@@ -88,10 +88,27 @@ function beginJourney(
         return true;
     }
 
+    const previousDelayRemaining =
+        entity.journey?.roadDelayRemaining ??
+        0;
     const firstLeg = prefixLeg ?? route.legs[0];
     const firstRoad = firstLeg
         ? navigation.roads.get(firstLeg.roadId)
         : null;
+    const newRoadId =
+        firstLeg?.roadId ?? null;
+    const sameRoad =
+        previousRoadId != null &&
+        previousRoadId === newRoadId;
+    const roadDelayRemaining =
+        sameRoad
+            ? previousDelayRemaining
+            : firstRoad
+                ? navigation
+                    .roadTraversalDelaySeconds(
+                        firstRoad,
+                    )
+                : 0;
 
     entity.journey = {
         destinationNodeId,
@@ -102,6 +119,7 @@ function beginJourney(
         pointIndex: firstRoad
             ? initialPointIndex(firstRoad, firstLeg)
             : 0,
+        roadDelayRemaining,
         validatedGraphRevision:
             navigation.graphRevision,
     };
@@ -113,9 +131,6 @@ function beginJourney(
         destinationNodeId,
         reason,
     });
-
-    const newRoadId =
-        firstLeg?.roadId ?? null;
 
     if (previousRoadId !== newRoadId) {
         emitRoadLeft(
@@ -472,6 +487,11 @@ function advanceLeg(world, navigation, entity, journey) {
                 firstRouteRoad,
                 firstRouteLeg,
             );
+        journey.roadDelayRemaining =
+            navigation
+                .roadTraversalDelaySeconds(
+                    firstRouteRoad,
+                );
 
         emitRoadEntered(
             world,
@@ -503,6 +523,11 @@ function advanceLeg(world, navigation, entity, journey) {
 
     journey.pointIndex =
         initialPointIndex(nextRoad, nextLeg);
+    journey.roadDelayRemaining =
+        navigation
+            .roadTraversalDelaySeconds(
+                nextRoad,
+            );
 
     emitRoadEntered(
         world,
@@ -627,6 +652,30 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             moved = true;
             remainingTime = 0;
             break;
+        }
+
+        if (
+            (journey.roadDelayRemaining ?? 0) >
+            EPSILON
+        ) {
+            const consumed = Math.min(
+                remainingTime,
+                journey.roadDelayRemaining,
+            );
+            journey.roadDelayRemaining -=
+                consumed;
+            remainingTime -= consumed;
+
+            if (
+                journey.roadDelayRemaining >
+                    EPSILON ||
+                remainingTime <= EPSILON
+            ) {
+                break;
+            }
+
+            journey.roadDelayRemaining = 0;
+            continue;
         }
 
         const leg = journey.prefixLeg ??
