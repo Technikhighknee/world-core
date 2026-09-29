@@ -1,10 +1,7 @@
 name: ci
 
 on:
-  push:
-    branches: [master, feat/multi-target-routing]
-  pull_request:
-    branches: [master]
+  workflow_dispatch:
 
 jobs:
   unit:
