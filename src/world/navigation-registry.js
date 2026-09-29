@@ -182,17 +182,28 @@ export class NavigationInstance {
             this.roadEffects.get(
                 roadId,
             );
-
-        if (!effects) {
-            effects = new Map();
-            this.roadEffects.set(
-                roadId,
-                effects,
-            );
-        }
-
         const previous =
-            effects.get(effectId);
+            effects?.get(effectId);
+
+        if (
+            !next.blocked &&
+            next.costMultiplier === 1
+        ) {
+            if (!previous) {
+                return false;
+            }
+
+            effects.delete(effectId);
+
+            if (effects.size === 0) {
+                this.roadEffects.delete(
+                    roadId,
+                );
+            }
+
+            this.#touch();
+            return true;
+        }
 
         if (
             previous &&
@@ -202,6 +213,14 @@ export class NavigationInstance {
                 next.costMultiplier
         ) {
             return false;
+        }
+
+        if (!effects) {
+            effects = new Map();
+            this.roadEffects.set(
+                roadId,
+                effects,
+            );
         }
 
         effects.set(
@@ -776,6 +795,16 @@ export class NavigationRegistry {
             roadId,
             effect,
         );
+
+        if (
+            instance.overrideEffectCount ===
+                0
+        ) {
+            this.domainInstances.delete(
+                domainId,
+            );
+            return null;
+        }
 
         return instance;
     }
