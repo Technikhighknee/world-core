@@ -2,7 +2,6 @@ import {
     circleIntersectsAabb,
     distanceSquaredPointToSegment,
 } from "./geometry.js";
-import { distanceSquared } from "./vec2.js";
 import { DomainSpatialIndex } from "./domain-spatial-index.js";
 import { ObstacleField } from "./obstacle-field.js";
 
@@ -12,9 +11,6 @@ export class World {
     constructor({
         spatialCellSize = 20,
         obstacleCellSize = spatialCellSize,
-        movementLodTiers = null,
-        interestPoints = [],
-        simulationRegions = [],
         domains = [],
         localSteering = null,
         captureEvents = false,
@@ -71,26 +67,6 @@ export class World {
         this.maxEntityRadius = 0;
 
         this.movingEntities = new Map();
-        this.movementBuckets = new Map();
-        this.movementAccumulators = new Map();
-        this.entityMovementIntervals = new Map();
-        this.movementReclassifyScratch = [];
-
-        this.movementLodTiers = null;
-        this.interestPoints = [];
-
-        this.simulationRegions =
-            new Map();
-
-        for (
-            const region of
-            simulationRegions
-        ) {
-            this.addSimulationRegion(
-                region,
-                { refresh: false },
-            );
-        }
 
         this.localSteering = null;
         this.localSteeringQueryBuffer =
@@ -102,11 +78,6 @@ export class World {
             );
         }
 
-        if (movementLodTiers) {
-            this.configureMovementLod(movementLodTiers);
-        }
-
-        this.setInterestPoints(interestPoints);
     }
 
     #trackRadius(radius) {
@@ -139,106 +110,6 @@ export class World {
         }
 
         this.maxEntityRadius = nextMax;
-    }
-
-    #movementIntervalFor(entity) {
-        const explicit = entity.simulation?.movementInterval;
-
-        if (explicit != null) {
-            const interval = Math.max(0, explicit);
-            return interval === 0 ? null : interval;
-        }
-
-        if (
-            entity.domainId !==
-            DEFAULT_WORLD_DOMAIN_ID
-        ) {
-            return null;
-        }
-
-        const simulationRegion =
-            this.simulationRegionAt(
-                entity.position,
-            );
-
-        if (
-            simulationRegion &&
-            simulationRegion.movementInterval != null
-        ) {
-            const interval =
-                Math.max(
-                    0,
-                    simulationRegion.movementInterval,
-                );
-
-            return interval === 0
-                ? null
-                : interval;
-        }
-
-        if (!this.hasDynamicMovementLod()) {
-            return null;
-        }
-
-        if (
-            !this.movementLodTiers?.length ||
-            this.interestPoints.length === 0
-        ) {
-            return null;
-        }
-
-        let nearestSquared = Infinity;
-
-        for (const point of this.interestPoints) {
-            const value = distanceSquared(entity.position, point);
-            if (value < nearestSquared) nearestSquared = value;
-        }
-
-        for (const tier of this.movementLodTiers) {
-            if (nearestSquared <= tier.maxDistanceSquared) {
-                return tier.interval;
-            }
-        }
-
-        return this.movementLodTiers[this.movementLodTiers.length - 1].interval;
-    }
-
-    #assignMovementInterval(entity, interval) {
-        const entityId = entity.id;
-        const current = this.entityMovementIntervals.get(entityId);
-
-        if (current === interval) return;
-
-        if (current != null) {
-            const currentBucket =
-                this.movementBuckets.get(current);
-
-            currentBucket?.delete(entity);
-            this.entityMovementIntervals.delete(entityId);
-
-            if (
-                currentBucket &&
-                currentBucket.size === 0
-            ) {
-                this.movementBuckets.delete(current);
-                this.movementAccumulators.delete(current);
-            }
-        }
-
-        if (interval == null) {
-            return;
-        }
-
-        let bucket = this.movementBuckets.get(interval);
-
-        if (!bucket) {
-            bucket = new Set();
-            this.movementBuckets.set(interval, bucket);
-            this.movementAccumulators.set(interval, 0);
-        }
-
-        bucket.add(entity);
-        this.entityMovementIntervals.set(entityId, interval);
     }
 
     #requireDomain(
@@ -1090,7 +961,6 @@ export class World {
         entity,
         x,
         y,
-        refreshMovementLod = true,
     ) {
         entity.position.x = x;
         entity.position.y = y;
@@ -1106,17 +976,6 @@ export class World {
             entity.position,
         );
 
-        if (
-            refreshMovementLod &&
-            this.movingEntities.has(
-                entity.id,
-            ) &&
-            this.hasDynamicMovementLod()
-        ) {
-            this.refreshEntityMovementLod(
-                entity.id,
-            );
-        }
     }
 
     setEntityRadius(entityId, radius) {
@@ -1291,409 +1150,26 @@ export class World {
         this.localSteering.enabled = false;
     }
 
-    addSimulationRegion(
-        {
-            id,
-            minX,
-            minY,
-            maxX,
-            maxY,
-            priority = 0,
-            detailLevel = "full",
-            movementInterval = null,
-            enabled = true,
-        },
-        { refresh = true } = {},
-    ) {
-        if (
-            typeof id !== "string" ||
-            id.length === 0
-        ) {
-            throw new Error(
-                "Simulation region id must be a non-empty string",
-            );
-        }
-
-        if (
-            this.simulationRegions.has(id)
-        ) {
-            throw new Error(
-                `Simulation region already exists: ${id}`,
-            );
-        }
-
-        if (
-            ![
-                minX,
-                minY,
-                maxX,
-                maxY,
-            ].every(Number.isFinite) ||
-            minX > maxX ||
-            minY > maxY
-        ) {
-            throw new Error(
-                `Invalid simulation region bounds: ${id}`,
-            );
-        }
-
-        if (
-            !Number.isFinite(priority)
-        ) {
-            throw new Error(
-                "Simulation region priority must be finite",
-            );
-        }
-
-        if (
-            typeof detailLevel !==
-                "string" ||
-            detailLevel.length === 0
-        ) {
-            throw new Error(
-                "Simulation region detailLevel must be a non-empty string",
-            );
-        }
-
-        if (
-            movementInterval != null &&
-            !(
-                Number.isFinite(
-                    movementInterval,
-                ) &&
-                movementInterval >= 0
-            )
-        ) {
-            throw new Error(
-                "Simulation region movementInterval must be null or a finite number >= 0",
-            );
-        }
-
-        const region = {
-            id,
-            minX,
-            minY,
-            maxX,
-            maxY,
-            priority,
-            detailLevel,
-            movementInterval,
-            enabled:
-                Boolean(enabled),
-        };
-
-        this.simulationRegions.set(
-            id,
-            region,
-        );
-
-        if (refresh) {
-            this.refreshAllMovementLod();
-        }
-
-        return region;
-    }
-
-    replaceSimulationRegion(
-        regionId,
-        patch,
-    ) {
-        const current =
-            this.simulationRegions.get(
-                regionId,
-            );
-
-        if (!current) {
-            throw new Error(
-                `Unknown simulation region: ${regionId}`,
-            );
-        }
-
-        this.simulationRegions.delete(
-            regionId,
-        );
-
-        try {
-            return this.addSimulationRegion(
-                {
-                    ...current,
-                    ...patch,
-                    id: regionId,
-                },
-            );
-        } catch (error) {
-            this.simulationRegions.set(
-                regionId,
-                current,
-            );
-            throw error;
-        }
-    }
-
-    removeSimulationRegion(
-        regionId,
-    ) {
-        const removed =
-            this.simulationRegions.delete(
-                regionId,
-            );
-
-        if (removed) {
-            this.refreshAllMovementLod();
-        }
-
-        return removed;
-    }
-
-    simulationRegionAt(position) {
-        let best = null;
-        let bestArea = Infinity;
-
-        for (
-            const region of
-            this.simulationRegions.values()
-        ) {
-            if (!region.enabled) {
-                continue;
-            }
-
-            if (
-                position.x < region.minX ||
-                position.x > region.maxX ||
-                position.y < region.minY ||
-                position.y > region.maxY
-            ) {
-                continue;
-            }
-
-            const area =
-                (region.maxX -
-                    region.minX) *
-                (region.maxY -
-                    region.minY);
-
-            if (
-                !best ||
-                region.priority >
-                    best.priority ||
-                (
-                    region.priority ===
-                        best.priority &&
-                    area < bestArea
-                ) ||
-                (
-                    region.priority ===
-                        best.priority &&
-                    area === bestArea &&
-                    region.id <
-                        best.id
-                )
-            ) {
-                best = region;
-                bestArea = area;
-            }
-        }
-
-        return best;
-    }
-
-    getEntitySimulationRegion(
-        entityId,
-    ) {
+    markMoving(entityId) {
         const entity =
             this.entities.get(entityId);
 
-        if (!entity) return null;
-
-        return this.simulationRegionAt(
-            entity.position,
-        );
-    }
-
-    configureMovementLod(tiers) {
-        if (!Array.isArray(tiers) || tiers.length === 0) {
-            this.movementLodTiers = null;
-            this.refreshAllMovementLod();
-            return;
-        }
-
-        let previousDistance = -Infinity;
-
-        this.movementLodTiers = tiers.map(tier => {
-            const maxDistance = tier.maxDistance ?? Infinity;
-            const interval = tier.interval ?? 0;
-
-            if (!(maxDistance > previousDistance)) {
-                throw new Error("Movement LOD tiers must have increasing maxDistance values");
-            }
-
-            if (!(interval >= 0)) {
-                throw new Error("Movement LOD interval must be greater than or equal to 0");
-            }
-
-            previousDistance = maxDistance;
-
-            return {
-                maxDistance,
-                maxDistanceSquared:
-                    maxDistance === Infinity ? Infinity : maxDistance * maxDistance,
-                interval,
-            };
-        });
-
-        this.refreshAllMovementLod();
-    }
-
-    setInterestPoints(points) {
-        this.interestPoints = points.map(point => ({
-            x: point.x,
-            y: point.y,
-        }));
-
-        this.refreshAllMovementLod();
-    }
-
-    setMovementInterval(entityId, interval) {
-        if (!(interval >= 0)) {
-            throw new Error("Movement interval must be greater than or equal to 0");
-        }
-
-        const entity = this.entities.get(entityId);
-
         if (!entity) {
-            throw new Error(`Unknown entity: ${entityId}`);
+            throw new Error(
+                `Unknown entity: ${entityId}`,
+            );
         }
 
-        entity.simulation ??= {};
-        entity.simulation.movementInterval = interval;
-        this.refreshEntityMovementLod(entityId);
-    }
-
-    clearMovementInterval(entityId) {
-        const entity = this.entities.get(entityId);
-        if (!entity) return;
-
-        if (entity.simulation) {
-            delete entity.simulation.movementInterval;
-        }
-
-        this.refreshEntityMovementLod(entityId);
-    }
-
-    markMoving(entityId) {
-        const entity = this.entities.get(entityId);
-
-        if (!entity) {
-            throw new Error(`Unknown entity: ${entityId}`);
-        }
-
-        this.movingEntities.set(entityId, entity);
-        this.#assignMovementInterval(
+        this.movingEntities.set(
+            entityId,
             entity,
-            this.#movementIntervalFor(entity),
         );
     }
 
     unmarkMoving(entityId) {
-        const entity = this.movingEntities.get(entityId);
-        this.movingEntities.delete(entityId);
-
-        const interval = this.entityMovementIntervals.get(entityId);
-
-        if (interval != null) {
-            const bucket =
-                this.movementBuckets.get(interval);
-
-            if (entity) {
-                bucket?.delete(entity);
-            }
-
-            this.entityMovementIntervals.delete(entityId);
-
-            if (
-                bucket &&
-                bucket.size === 0
-            ) {
-                this.movementBuckets.delete(interval);
-                this.movementAccumulators.delete(interval);
-            }
-        }
-    }
-
-    refreshEntityMovementLod(entityId) {
-        const entity = this.movingEntities.get(entityId);
-        if (!entity) return;
-
-        this.#assignMovementInterval(
-            entity,
-            this.#movementIntervalFor(entity),
+        this.movingEntities.delete(
+            entityId,
         );
-    }
-
-    hasDynamicMovementLod() {
-        if (
-            [...this.simulationRegions.values()]
-                .some(region =>
-                    region.enabled &&
-                    region.movementInterval != null)
-        ) {
-            return true;
-        }
-
-        return Boolean(
-            this.movementLodTiers?.length &&
-            this.interestPoints.length > 0
-        );
-    }
-
-    refreshAllMovementLod() {
-        for (const entity of this.movingEntities.values()) {
-            this.#assignMovementInterval(
-                entity,
-                this.#movementIntervalFor(entity),
-            );
-        }
-    }
-
-    forEachDueMovementBatch(deltaSeconds, callback) {
-        const scheduledCount = this.entityMovementIntervals.size;
-
-        if (scheduledCount < this.movingEntities.size) {
-            callback(
-                this.movingEntities.values(),
-                deltaSeconds,
-                scheduledCount > 0
-                    ? this.entityMovementIntervals
-                    : null,
-            );
-        }
-
-        for (const [interval, entityIds] of this.movementBuckets) {
-            if (entityIds.size === 0) continue;
-
-            if (interval === 0) {
-                callback(entityIds, deltaSeconds, null);
-                continue;
-            }
-
-            const accumulated =
-                (this.movementAccumulators.get(interval) ?? 0) + deltaSeconds;
-
-            const dueIntervals = Math.floor((accumulated + 1e-9) / interval);
-
-            if (dueIntervals <= 0) {
-                this.movementAccumulators.set(interval, accumulated);
-                continue;
-            }
-
-            const elapsedSeconds = dueIntervals * interval;
-            this.movementAccumulators.set(
-                interval,
-                accumulated - elapsedSeconds,
-            );
-
-            callback(entityIds, elapsedSeconds, null);
-        }
     }
 
     createSpatialQueryBuffer() {
@@ -2024,12 +1500,6 @@ export class World {
     }
 
     getDiagnostics() {
-        let movementBucketMemberships = 0;
-
-        for (const bucket of this.movementBuckets.values()) {
-            movementBucketMemberships += bucket.size;
-        }
-
         let radiusTrackedEntities = 0;
 
         for (const count of this.radiusCounts.values()) {
@@ -2049,9 +1519,6 @@ export class World {
             occupiedSpatialDomainCount:
                 this.spatial.occupiedDomainCount(),
             movingEntities: this.movingEntities.size,
-            movementIntervalEntries: this.entityMovementIntervals.size,
-            movementBucketCount: this.movementBuckets.size,
-            movementBucketMemberships,
             radiusTrackedEntities,
             radiusCountEntries: this.radiusCounts.size,
             maxEntityRadius: this.maxEntityRadius,
@@ -2080,14 +1547,6 @@ export class World {
                 this.eventQueueLimit,
             droppedEventCount:
                 this.droppedEventCount,
-            simulationRegionCount:
-                this.simulationRegions.size,
-            scheduledSimulationRegionCount:
-                [...this.simulationRegions.values()]
-                    .filter(region =>
-                        region.enabled &&
-                        region.movementInterval != null)
-                    .length,
         };
     }
 
@@ -2236,125 +1695,12 @@ export class World {
         }
 
         if (
-            diagnostics.movementBucketMemberships !==
-            diagnostics.movementIntervalEntries
-        ) {
-            throw new Error(
-                `Movement scheduling drift: ${diagnostics.movementBucketMemberships} bucket memberships for ${diagnostics.movementIntervalEntries} scheduled movers`,
-            );
-        }
-
-        if (
-            diagnostics.movementIntervalEntries >
-            diagnostics.movingEntities
-        ) {
-            throw new Error(
-                `Movement scheduling overflow: ${diagnostics.movementIntervalEntries} scheduled movers for ${diagnostics.movingEntities} active movers`,
-            );
-        }
-
-        for (const [entityId, entity] of this.movingEntities) {
-            if (this.entities.get(entityId) !== entity) {
-                throw new Error(
-                    `Moving entity registry mismatch: ${entityId}`,
-                );
-            }
-        }
-
-        for (const entityId of this.entityMovementIntervals.keys()) {
-            if (!this.movingEntities.has(entityId)) {
-                throw new Error(
-                    `Scheduled entity is not moving: ${entityId}`,
-                );
-            }
-        }
-
-        if (
             diagnostics.eventQueueSize >
             diagnostics.eventQueueLimit
         ) {
             throw new Error(
                 `Event queue overflow: ${diagnostics.eventQueueSize} events for limit ${diagnostics.eventQueueLimit}`,
             );
-        }
-
-        for (
-            const [interval, bucket] of
-            this.movementBuckets
-        ) {
-            if (bucket.size === 0) {
-                throw new Error(
-                    `Empty movement bucket retained: ${interval}`,
-                );
-            }
-
-            if (
-                !this.movementAccumulators.has(
-                    interval,
-                )
-            ) {
-                throw new Error(
-                    `Movement bucket missing accumulator: ${interval}`,
-                );
-            }
-        }
-
-        for (
-            const interval of
-            this.movementAccumulators.keys()
-        ) {
-            if (
-                !this.movementBuckets.has(
-                    interval,
-                )
-            ) {
-                throw new Error(
-                    `Movement accumulator missing bucket: ${interval}`,
-                );
-            }
-        }
-
-        for (
-            const [regionId, region] of
-            this.simulationRegions
-        ) {
-            if (
-                region.id !== regionId
-            ) {
-                throw new Error(
-                    `Simulation region id mismatch: ${regionId}`,
-                );
-            }
-
-            if (
-                ![
-                    region.minX,
-                    region.minY,
-                    region.maxX,
-                    region.maxY,
-                    region.priority,
-                ].every(Number.isFinite) ||
-                region.minX > region.maxX ||
-                region.minY > region.maxY
-            ) {
-                throw new Error(
-                    `Invalid simulation region state: ${regionId}`,
-                );
-            }
-
-            if (
-                region.movementInterval != null &&
-                !(
-                    Number.isFinite(
-                        region.movementInterval,
-                    ) &&
-                    region.movementInterval >= 0
-                )
-            ) {
-                throw new Error(
-                    `Invalid simulation region movement interval: ${regionId}`,
-                );
-            }
         }
 
         this.obstacles.assertInternalConsistency();
