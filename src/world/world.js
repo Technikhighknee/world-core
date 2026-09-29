@@ -9,6 +9,8 @@ import { ObstacleField } from "./obstacle-field.js";
 export const DEFAULT_WORLD_DOMAIN_ID = "default";
 
 export class World {
+    #eventSubscribers = new Set();
+
     constructor({
         spatialCellSize = 20,
         obstacleCellSize = spatialCellSize,
@@ -44,8 +46,6 @@ export class World {
         this.eventQueueLimit = 0;
         this.eventOverflowPolicy = "drop-newest";
         this.droppedEventCount = 0;
-        this.eventSubscribers = new Set();
-
         this.configureEventQueue({
             limit: eventQueueLimit,
             overflowPolicy:
@@ -401,7 +401,7 @@ export class World {
             onError,
         };
 
-        this.eventSubscribers.add(
+        this.#eventSubscribers.add(
             subscription,
         );
 
@@ -411,7 +411,7 @@ export class World {
             if (!active) return false;
             active = false;
 
-            return this.eventSubscribers.delete(
+            return this.#eventSubscribers.delete(
                 subscription,
             );
         };
@@ -419,14 +419,14 @@ export class World {
 
     #notifyEventSubscribers(event) {
         if (
-            this.eventSubscribers.size ===
+            this.#eventSubscribers.size ===
             0
         ) {
             return;
         }
 
         const subscriptions = [
-            ...this.eventSubscribers,
+            ...this.#eventSubscribers,
         ];
 
         for (
@@ -434,7 +434,7 @@ export class World {
             subscriptions
         ) {
             if (
-                !this.eventSubscribers.has(
+                !this.#eventSubscribers.has(
                     subscription,
                 )
             ) {
@@ -488,7 +488,7 @@ export class World {
 
     emitEvent(type, data = {}) {
         const hasSubscribers =
-            this.eventSubscribers.size >
+            this.#eventSubscribers.size >
             0;
 
         if (
