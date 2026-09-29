@@ -52,6 +52,7 @@ export interface Journey {
 export interface Entity {
     id: EntityId;
     position: Vec2;
+    domainId?: string;
     kind?: string;
     body?: Body;
     mobility?: Mobility;
@@ -184,12 +185,23 @@ export type EventOverflowPolicy =
     | "drop-oldest"
     | "throw";
 
+export interface WorldDomainInput {
+    id: string;
+}
+
+export interface WorldDomain {
+    id: string;
+    readonly handle: number;
+    readonly entityCount: number;
+}
+
 export interface WorldOptions {
     spatialCellSize?: number;
     obstacleCellSize?: number;
     movementLodTiers?: readonly MovementLodTier[] | null;
     interestPoints?: readonly Vec2[];
     simulationRegions?: readonly SimulationRegionInput[];
+    domains?: readonly WorldDomainInput[];
     localSteering?: LocalSteeringOptions | null;
     captureEvents?: boolean;
     eventQueueLimit?: number;
@@ -249,6 +261,7 @@ export interface SpatialQueryBuffer<T extends Entity = Entity> {
 export interface EntityQueryOptions<T extends Entity = Entity> {
     excludeId?: EntityId | null;
     predicate?: ((entity: T) => boolean) | null;
+    domainId?: string | null;
 }
 
 export interface NearestEntityResult<T extends Entity = Entity> {
@@ -263,6 +276,8 @@ export interface WorldDiagnostics {
     spatialCellCount: number;
     spatialMemberships: number;
     spatialMultiOccupancyCells: number;
+    domainCount: number;
+    occupiedSpatialDomainCount: number;
     movingEntities: number;
     movementIntervalEntries: number;
     movementBucketCount: number;
@@ -279,11 +294,14 @@ export interface WorldDiagnostics {
     scheduledSimulationRegionCount: number;
 }
 
+export const DEFAULT_WORLD_DOMAIN_ID: "default";
+
 export class World<T extends Entity = Entity> {
     constructor(options?: WorldOptions);
 
     time: number;
     readonly entities: Map<EntityId, T>;
+    readonly domains: Map<string, WorldDomain>;
     readonly movingEntities: Map<EntityId, T>;
     captureEvents: boolean;
     eventQueueLimit: number;
@@ -323,12 +341,25 @@ export class World<T extends Entity = Entity> {
         options?: {
             includeDisabled?: boolean;
             predicate?: ((obstacle: Obstacle) => boolean) | null;
+            domainId?: string;
         },
     ): Obstacle[];
+
+    addDomain(input: WorldDomainInput): WorldDomain;
+    removeDomain(domainId: string): boolean;
+    getDomain(domainId: string): WorldDomain | undefined;
+    getEntityDomain(entityId: EntityId): WorldDomain | null;
 
     addEntity(entity: T): T;
     removeEntity(entityId: EntityId): boolean;
     getEntity(entityId: EntityId): T | undefined;
+    transferEntity(
+        entityId: EntityId,
+        target: {
+            domainId: string;
+            position: Vec2;
+        },
+    ): T;
     setPosition(entityId: EntityId, position: Vec2): void;
     setPositionXY(entityId: EntityId, x: number, y: number): void;
     setEntityPositionXY(entity: T, x: number, y: number): void;
@@ -413,6 +444,7 @@ export class World<T extends Entity = Entity> {
             maxDistance?: number;
             excludeId?: EntityId | null;
             predicate?: ((entity: T) => boolean) | null;
+            domainId?: string | null;
         },
     ): NearestEntityResult<T> | null;
 
