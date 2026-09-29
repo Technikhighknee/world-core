@@ -90,6 +90,13 @@ export class DomainSpatialIndex {
     #coordinate(value) {
         return Math.floor(value / this.cellSize);
     }
+    get cells() {
+        return (
+            this.cellsByDomain.get(0) ??
+            new Map()
+        );
+    }
+
 
     #domainCells(domainHandle, create = false) {
         let cells = this.cellsByDomain.get(domainHandle);
