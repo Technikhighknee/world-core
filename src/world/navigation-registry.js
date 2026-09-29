@@ -391,6 +391,36 @@ export class NavigationInstance {
             );
     }
 
+    findRouteCostsFromPositionToMany(
+        position,
+        destinationNodeIds,
+        mobility,
+        options = {},
+    ) {
+        return this.topology
+            .findRouteCostsFromPositionToMany(
+                position,
+                destinationNodeIds,
+                mobility,
+                options,
+                this.runtimePolicy,
+            );
+    }
+
+    findRouteCostsToMany(
+        startNodeId,
+        destinationNodeIds,
+        mobility,
+    ) {
+        return this.topology
+            .findRouteCostsToMany(
+                startNodeId,
+                destinationNodeIds,
+                mobility,
+                this.runtimePolicy,
+            );
+    }
+
     findRouteFromPositionToAny(
         position,
         destinationNodeIds,
