@@ -996,6 +996,34 @@ export function validateWorldCoreSnapshot(
         );
     }
 
+    if (navigationRegistry) {
+        for (
+            let index = 0;
+            index <
+                navigationRegistry
+                    .domainBindings.length;
+            index++
+        ) {
+            const binding =
+                navigationRegistry
+                    .domainBindings[
+                        index
+                    ];
+
+            if (
+                !domainIds.has(
+                    "string:" +
+                        binding.domainId,
+                )
+            ) {
+                fail(
+                    `$.navigation.domainBindings[${index}].domainId`,
+                    "references missing world domain",
+                );
+            }
+        }
+    }
+
     const obstacles =
         requireArray(
             world.obstacles ?? [],
@@ -1278,6 +1306,8 @@ export function validateWorldCoreSnapshot(
                 route,
             ]),
         );
+    const routeContextById =
+        new Map();
 
     for (
         let index = 0;
@@ -1288,6 +1318,63 @@ export function validateWorldCoreSnapshot(
             routes[index];
         const path =
             `$.routes[${index}]`;
+
+        let context =
+            defaultNavigationContext;
+
+        if (navigationRegistry) {
+            if (
+                typeof route.topologyId !==
+                    "string" ||
+                route.topologyId.length ===
+                    0
+            ) {
+                fail(
+                    `${path}.topologyId`,
+                    "expected navigation topology id",
+                );
+            }
+
+            context =
+                navigationContexts.get(
+                    route.topologyId,
+                ) ?? null;
+
+            if (!context) {
+                fail(
+                    `${path}.topologyId`,
+                    "references missing navigation topology",
+                );
+            }
+        } else if (
+            route.topologyId !==
+                undefined &&
+            route.topologyId !== null
+        ) {
+            fail(
+                `${path}.topologyId`,
+                "unexpected topology id for single navigation snapshot",
+            );
+        }
+
+        if (!context) {
+            fail(
+                path,
+                "no navigation topology is available for route",
+            );
+        }
+
+        routeContextById.set(
+            route.id,
+            context,
+        );
+
+        const {
+            nodeIds,
+            roadIds,
+            roadByKey,
+            nodeKey,
+        } = context;
 
         if (
             !nodeIds.has(
