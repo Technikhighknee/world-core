@@ -752,3 +752,80 @@ test("public position changes immediately reclassify moving entities for region 
         false,
     );
 });
+
+
+test("public setEntityPositionXY also reclassifies moving entities without affecting the movement hot path contract", () => {
+    const navigation =
+        buildNavigation();
+    const world = new World({
+        simulationRegions: [
+            {
+                id: "coarse",
+                minX: -5,
+                minY: -5,
+                maxX: 5,
+                maxY: 5,
+                movementInterval: 7,
+            },
+        ],
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: {
+            x: 10,
+            y: 0,
+        },
+        mobility:
+            mobilityProfile(
+                "pedestrian",
+            ),
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "walker",
+        "c",
+    );
+
+    assert.equal(
+        world.entityMovementIntervals
+            .has("walker"),
+        false,
+    );
+
+    const walker =
+        world.getEntity("walker");
+
+    world.setEntityPositionXY(
+        walker,
+        0,
+        0,
+    );
+
+    assert.equal(
+        world.entityMovementIntervals
+            .get("walker"),
+        7,
+    );
+
+    const snapshot =
+        serializeWorldCore(
+            world,
+            navigation,
+        );
+
+    assert.deepEqual(
+        snapshot.world
+            .movementAccumulators,
+        [[7, 0]],
+    );
+
+    assert.equal(
+        validateWorldCoreSnapshot(
+            snapshot,
+        ),
+        true,
+    );
+});
