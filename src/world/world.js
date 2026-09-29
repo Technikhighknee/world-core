@@ -477,6 +477,13 @@ export class World {
         }
 
         this.setEntityPositionXY(entity, x, y);
+
+        if (
+            this.movingEntities.has(entityId) &&
+            this.hasDynamicMovementLod()
+        ) {
+            this.refreshEntityMovementLod(entityId);
+        }
     }
 
     setEntityPositionXY(entity, x, y) {
