@@ -521,7 +521,7 @@ export class NavigationRegistry {
         effectId: string,
         roadId: NavigationId,
         effect?: Partial<RoadEffect>,
-    ): NavigationInstance;
+    ): NavigationInstance | null;
     removeDomainRoadEffect(
         domainId: string,
         effectId: string,
