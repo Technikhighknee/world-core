@@ -323,7 +323,7 @@ npm run example:mini-city
 It builds a small street graph, enables crowd steering, adds a market obstacle, applies and clears a temporary road closure, serializes/restores mid-simulation and drains movement events. The matching integration test imports only from `"world-core"`, so internal implementation imports cannot hide gaps in the published API.
 
 
-## Hierarchical routing and simulation regions
+## Hierarchical routing
 
 Navigation regions partition large graphs without replacing the exact node/road model. Cross-region roads automatically define gateway nodes.
 
@@ -354,34 +354,10 @@ const route = navigation.findHierarchicalRoute(
 
 `findHierarchicalRoute()` builds an overlay from regional gateway nodes. Travel inside each region is refined with an exact region-constrained A* route, while cross-region roads connect the overlay. The resulting route is still a normal `Route` and can be consumed by the existing movement system. Regional and final hierarchical routes have independent bounded caches and are invalidated on graph, road-effect, or region-membership changes.
 
-World simulation regions are spatial AABBs used for simulation detail policy rather than pathfinding:
+### Simulation policy is external
 
-```js
-const world = new World({
-  simulationRegions: [
-    {
-      id: "player-city",
-      minX: 0,
-      minY: 0,
-      maxX: 2000,
-      maxY: 2000,
-      priority: 10,
-      detailLevel: "full",
-      movementInterval: 0
-    },
-    {
-      id: "distant-city",
-      minX: 10000,
-      minY: 0,
-      maxX: 12000,
-      maxY: 2000,
-      detailLevel: "background",
-      movementInterval: 30
-    }
-  ]
-});
-```
+`world-core` does not reduce movement fidelity because something is far from a player, camera, or arbitrary interest point. Active movers advance with the simulation's actual `deltaSeconds` wherever they are.
 
-Overlapping simulation regions resolve deterministically by higher priority, then smaller area, then region ID. A region's `movementInterval` feeds directly into the existing movement scheduler; `null` falls back to distance LOD and `0` means full-rate movement. Consumers can query `simulationRegionAt(position)` or `getEntitySimulationRegion(id)` for their own AI/economy detail policies.
+If a consumer wants coarse AI, economy, or background processing, that scheduling policy belongs outside `world-core`. This keeps spatial truth and movement deterministic and avoids assuming that any player or privileged viewpoint exists.
 
-Navigation regions and world simulation regions are intentionally separate layers. A consumer may use the same IDs for both, but the core does not force graph partitions to match spatial simulation policy. Both are persisted in the current internal snapshot format. Until world-core has real savegame consumers, that format remains v1 and may evolve without compatibility guarantees.
+Until world-core has real savegame consumers, the internal snapshot format remains v1 and may evolve without compatibility guarantees.
