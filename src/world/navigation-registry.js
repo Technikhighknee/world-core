@@ -65,14 +65,6 @@ export class NavigationRegistry {
             navigation,
         );
 
-        if (
-            this.defaultTopologyId ==
-                null
-        ) {
-            this.defaultTopologyId =
-                id;
-        }
-
         return navigation;
     }
 
