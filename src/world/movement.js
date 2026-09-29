@@ -396,12 +396,20 @@ function replanInvalidJourney(
         entity.mobility.navigationEntryMaxDistance ??
         0;
 
-    const planned = navigation.findRouteFromPosition(
-        entity.position,
-        destinationNodeId,
-        entity.mobility,
-        { entryMaxDistance },
-    );
+    const entityNavigation =
+        navigationForEntity(
+            navigation,
+            entity,
+        );
+
+    const planned =
+        entityNavigation
+            .findRouteFromPosition(
+                entity.position,
+                destinationNodeId,
+                entity.mobility,
+                { entryMaxDistance },
+            );
 
     if (!planned) {
         invalidateJourney(
@@ -414,7 +422,7 @@ function replanInvalidJourney(
 
     beginJourney(
         world,
-        navigation,
+        entityNavigation,
         entity,
         destinationNodeId,
         planned,
