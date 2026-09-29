@@ -231,15 +231,27 @@ function serializeLodTiers(world) {
 
 function serializeObstacles(world) {
     return [
-        ...world.obstacles
-            .obstacles.values(),
+        ...world.obstacleDomains.entries(),
     ]
-        .sort((a, b) =>
-            String(a.id).localeCompare(
-                String(b.id),
-            ))
-        .map(obstacle =>
-            clone(obstacle));
+        .sort(
+            ([a], [b]) =>
+                String(a).localeCompare(
+                    String(b),
+                ),
+        )
+        .map(
+            ([
+                obstacleId,
+                domainId,
+            ]) => ({
+                ...clone(
+                    world.getObstacle(
+                        obstacleId,
+                    ),
+                ),
+                domainId,
+            }),
+        );
 }
 
 function deserializeObstacles(
@@ -247,11 +259,21 @@ function deserializeObstacles(
     obstacles,
 ) {
     for (
-        const obstacle of
+        const serialized of
         obstacles ?? []
     ) {
+        const {
+            domainId,
+            ...obstacle
+        } = clone(serialized);
+
         world.addObstacle(
-            clone(obstacle),
+            obstacle,
+            {
+                domainId:
+                    domainId ??
+                    "default",
+            },
         );
     }
 }
