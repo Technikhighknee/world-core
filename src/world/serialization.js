@@ -320,22 +320,6 @@ function deserializeNavigationSource(
     return registry;
 }
 
-function serializeLodTiers(world) {
-    if (!world.movementLodTiers) return null;
-
-    return world.movementLodTiers.map(
-        tier => ({
-            maxDistance:
-                Number.isFinite(
-                    tier.maxDistance,
-                )
-                    ? tier.maxDistance
-                    : null,
-            interval: tier.interval,
-        }),
-    );
-}
-
 function serializeObstacles(world) {
     return [
         ...world.obstacleDomains.entries(),
@@ -710,17 +694,6 @@ export function serializeWorldCore(
                 world.obstacles.index.cellSize,
             obstacles:
                 serializeObstacles(world),
-            movementLodTiers:
-                serializeLodTiers(world),
-            simulationRegions:
-                [...world.simulationRegions.values()]
-                    .sort((a, b) =>
-                        a.id.localeCompare(b.id))
-                    .map(region => ({
-                        ...region,
-                    })),
-            interestPoints:
-                clone(world.interestPoints),
             localSteering:
                 clone(world.localSteering),
             captureEvents:
@@ -729,12 +702,6 @@ export function serializeWorldCore(
                 world.eventQueueLimit,
             eventOverflowPolicy:
                 world.eventOverflowPolicy,
-            movementAccumulators:
-                [...world.movementAccumulators]
-                    .sort(
-                        ([a], [b]) =>
-                            a - b,
-                    ),
         },
 
         routes: entityData.routes,
@@ -769,14 +736,8 @@ export function deserializeWorldCore(
             snapshot.world.spatialCellSize,
         obstacleCellSize:
             snapshot.world.obstacleCellSize,
-        movementLodTiers:
-            snapshot.world.movementLodTiers,
-        simulationRegions:
-            snapshot.world.simulationRegions ?? [],
         domains:
             snapshot.world.domains ?? [],
-        interestPoints:
-            snapshot.world.interestPoints,
         localSteering:
             snapshot.world.localSteering,
         captureEvents:
@@ -807,22 +768,6 @@ export function deserializeWorldCore(
         },
     );
 
-    for (
-        const [interval, accumulated] of
-        snapshot.world
-            .movementAccumulators ?? []
-    ) {
-        if (
-            world.movementAccumulators.has(
-                interval,
-            )
-        ) {
-            world.movementAccumulators.set(
-                interval,
-                accumulated,
-            );
-        }
-    }
 
     world.events.length = 0;
 
