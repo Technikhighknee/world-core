@@ -1,6 +1,9 @@
 import {
     MOBILITY_PROFILES,
 } from "./mobility-profiles.js";
+import {
+    DEFAULT_WORLD_DOMAIN_ID,
+} from "./world.js";
 
 function fail(path, message) {
     throw new Error(
@@ -398,84 +401,55 @@ function validateMobility(
     );
 }
 
-export function validateWorldCoreSnapshot(
-    snapshot,
-    {
-        expectedFormat =
-            "world-core",
-        expectedVersion = 1,
-    } = {},
+function validateNavigationTopology(
+    value,
+    path,
 ) {
-    requireObject(
-        snapshot,
-        "$",
-    );
-
-    if (
-        snapshot.format !==
-        expectedFormat
-    ) {
-        fail(
-            "$.format",
-            `expected ${expectedFormat}`,
-        );
-    }
-
-    if (
-        snapshot.version !==
-        expectedVersion
-    ) {
-        fail(
-            "$.version",
-            `expected version ${expectedVersion}`,
-        );
-    }
-
     const navigation =
         requireObject(
-            snapshot.navigation,
-            "$.navigation",
+            value,
+            path,
         );
 
     requirePositive(
         navigation.spatialCellSize,
-        "$.navigation.spatialCellSize",
+        `${path}.spatialCellSize`,
     );
     requireInteger(
         navigation.routeCacheSize,
-        "$.navigation.routeCacheSize",
+        `${path}.routeCacheSize`,
     );
     requireInteger(
         navigation.routeCacheMaxLegs,
-        "$.navigation.routeCacheMaxLegs",
+        `${path}.routeCacheMaxLegs`,
     );
     requireInteger(
         navigation.routeCacheMaxTotalLegs,
-        "$.navigation.routeCacheMaxTotalLegs",
+        `${path}.routeCacheMaxTotalLegs`,
     );
     requireInteger(
         navigation.hierarchicalRouteCacheSize,
-        "$.navigation.hierarchicalRouteCacheSize",
+        `${path}.hierarchicalRouteCacheSize`,
     );
     requireInteger(
         navigation.regionalRouteCacheSize,
-        "$.navigation.regionalRouteCacheSize",
+        `${path}.regionalRouteCacheSize`,
     );
 
     const regions =
         requireArray(
             navigation.regions ?? [],
-            "$.navigation.regions",
+            `${path}.regions`,
         );
 
     const regionIds =
         requireUniqueIds(
             regions,
-            "$.navigation.regions",
+            `${path}.regions`,
             region => {
                 requireObject(
                     region,
-                    "$.navigation.regions[]",
+                    `${path}.regions[]`,
                 );
 
                 if (
@@ -484,7 +458,7 @@ export function validateWorldCoreSnapshot(
                     region.id.length === 0
                 ) {
                     fail(
-                        "$.navigation.regions[].id",
+                        `${path}.regions[].id`,
                         "expected non-empty string",
                     );
                 }
@@ -496,20 +470,20 @@ export function validateWorldCoreSnapshot(
     const nodes =
         requireArray(
             navigation.nodes,
-            "$.navigation.nodes",
+            `${path}.nodes`,
         );
     const nodeIds =
         requireUniqueIds(
             nodes,
-            "$.navigation.nodes",
+            `${path}.nodes`,
             node => {
                 requireObject(
                     node,
-                    "$.navigation.nodes[]",
+                    `${path}.nodes[]`,
                 );
                 return requireId(
                     node.id,
-                    "$.navigation.nodes[].id",
+                    `${path}.nodes[].id`,
                 );
             },
         );
@@ -526,20 +500,20 @@ export function validateWorldCoreSnapshot(
     ) {
         const node =
             nodes[index];
-        const path =
-            `$.navigation.nodes[${index}]`;
+        const itemPath =
+            `${path}.nodes[${index}]`;
 
         requireFinite(
             node.x,
-            `${path}.x`,
+            `${itemPath}.x`,
         );
         requireFinite(
             node.y,
-            `${path}.y`,
+            `${itemPath}.y`,
         );
         requireNonNegative(
             node.junctionRadius ?? 0,
-            `${path}.junctionRadius`,
+            `${itemPath}.junctionRadius`,
         );
 
         if (
@@ -551,7 +525,7 @@ export function validateWorldCoreSnapshot(
             )
         ) {
             fail(
-                `${path}.regionId`,
+                `${itemPath}.regionId`,
                 "references missing navigation region",
             );
         }
@@ -560,20 +534,20 @@ export function validateWorldCoreSnapshot(
     const roads =
         requireArray(
             navigation.roads,
-            "$.navigation.roads",
+            `${path}.roads`,
         );
     const roadIds =
         requireUniqueIds(
             roads,
-            "$.navigation.roads",
+            `${path}.roads`,
             road => {
                 requireObject(
                     road,
-                    "$.navigation.roads[]",
+                    `${path}.roads[]`,
                 );
                 return requireId(
                     road.id,
-                    "$.navigation.roads[].id",
+                    `${path}.roads[].id`,
                 );
             },
         );
@@ -595,8 +569,8 @@ export function validateWorldCoreSnapshot(
     ) {
         const road =
             roads[index];
-        const path =
-            `$.navigation.roads[${index}]`;
+        const itemPath =
+            `${path}.roads[${index}]`;
 
         if (
             !nodeIds.has(
@@ -604,7 +578,7 @@ export function validateWorldCoreSnapshot(
             )
         ) {
             fail(
-                `${path}.from`,
+                `${itemPath}.from`,
                 "references missing node",
             );
         }
@@ -615,14 +589,14 @@ export function validateWorldCoreSnapshot(
             )
         ) {
             fail(
-                `${path}.to`,
+                `${itemPath}.to`,
                 "references missing node",
             );
         }
 
         requirePositive(
             road.width,
-            `${path}.width`,
+            `${itemPath}.width`,
         );
 
         if (
@@ -630,40 +604,40 @@ export function validateWorldCoreSnapshot(
             "string"
         ) {
             fail(
-                `${path}.surface`,
+                `${itemPath}.surface`,
                 "expected string",
             );
         }
 
         requireBoolean(
             road.bidirectional,
-            `${path}.bidirectional`,
+            `${itemPath}.bidirectional`,
         );
         requireBoolean(
             road.enabled,
-            `${path}.enabled`,
+            `${itemPath}.enabled`,
         );
 
         validateStringArray(
             road.allowedProfiles,
-            `${path}.allowedProfiles`,
+            `${itemPath}.allowedProfiles`,
             {
                 nullable: true,
             },
         );
         validateStringArray(
             road.blockedProfiles ?? [],
-            `${path}.blockedProfiles`,
+            `${itemPath}.blockedProfiles`,
         );
         validateStringArray(
             road.tags ?? [],
-            `${path}.tags`,
+            `${itemPath}.tags`,
         );
 
         const shape =
             requireArray(
                 road.shape,
-                `${path}.shape`,
+                `${itemPath}.shape`,
             );
 
         for (
@@ -680,19 +654,19 @@ export function validateWorldCoreSnapshot(
 
         requireInteger(
             road.version,
-            `${path}.version`,
+            `${itemPath}.version`,
             1,
         );
 
         const effects =
             requireArray(
                 road.effects ?? [],
-                `${path}.effects`,
+                `${itemPath}.effects`,
             );
 
         requireUniqueIds(
             effects,
-            `${path}.effects`,
+            `${itemPath}.effects`,
             effect => {
                 requireObject(
                     effect,
@@ -748,6 +722,333 @@ export function validateWorldCoreSnapshot(
 
     }
 
+    return {
+        nodeIds,
+        roadIds,
+        roadByKey,
+        nodeKey,
+    };
+}
+
+export function validateWorldCoreSnapshot(
+    snapshot,
+    {
+        expectedFormat =
+            "world-core",
+        expectedVersion = 1,
+    } = {},
+) {
+    requireObject(
+        snapshot,
+        "$",
+    );
+
+    if (
+        snapshot.format !==
+        expectedFormat
+    ) {
+        fail(
+            "$.format",
+            `expected ${expectedFormat}`,
+        );
+    }
+
+    if (
+        snapshot.version !==
+        expectedVersion
+    ) {
+        fail(
+            "$.version",
+            `expected version ${expectedVersion}`,
+        );
+    }
+
+    const navigationSnapshot =
+        requireObject(
+            snapshot.navigation,
+            "$.navigation",
+        );
+
+    const navigationContexts =
+        new Map();
+    const navigationBindingByDomain =
+        new Map();
+    let navigationRegistry =
+        null;
+    let defaultNavigationContext =
+        null;
+
+    if (
+        navigationSnapshot.type ===
+        "registry"
+    ) {
+        navigationRegistry =
+            navigationSnapshot;
+
+        const topologies =
+            requireArray(
+                navigationRegistry.topologies,
+                "$.navigation.topologies",
+            );
+
+        requireUniqueIds(
+            topologies,
+            "$.navigation.topologies",
+            topology => {
+                requireObject(
+                    topology,
+                    "$.navigation.topologies[]",
+                );
+
+                if (
+                    typeof topology.id !==
+                        "string" ||
+                    topology.id.length ===
+                        0
+                ) {
+                    fail(
+                        "$.navigation.topologies[].id",
+                        "expected non-empty string",
+                    );
+                }
+
+                return topology.id;
+            },
+        );
+
+        for (
+            let index = 0;
+            index < topologies.length;
+            index++
+        ) {
+            const topology =
+                topologies[index];
+            const context =
+                validateNavigationTopology(
+                    topology.navigation,
+                    `$.navigation.topologies[${index}].navigation`,
+                );
+
+            navigationContexts.set(
+                topology.id,
+                context,
+            );
+        }
+
+        if (
+            navigationRegistry
+                .defaultTopologyId !==
+                null
+        ) {
+            if (
+                typeof navigationRegistry
+                    .defaultTopologyId !==
+                    "string" ||
+                !navigationContexts.has(
+                    navigationRegistry
+                        .defaultTopologyId,
+                )
+            ) {
+                fail(
+                    "$.navigation.defaultTopologyId",
+                    "references missing navigation topology",
+                );
+            }
+
+            defaultNavigationContext =
+                navigationContexts.get(
+                    navigationRegistry
+                        .defaultTopologyId,
+                );
+        }
+
+        const bindings =
+            requireArray(
+                navigationRegistry
+                    .domainBindings ?? [],
+                "$.navigation.domainBindings",
+            );
+
+        const seenBindings =
+            new Set();
+
+        for (
+            let index = 0;
+            index < bindings.length;
+            index++
+        ) {
+            const binding =
+                requireObject(
+                    bindings[index],
+                    `$.navigation.domainBindings[${index}]`,
+                );
+
+            if (
+                typeof binding.domainId !==
+                    "string" ||
+                binding.domainId.length ===
+                    0
+            ) {
+                fail(
+                    `$.navigation.domainBindings[${index}].domainId`,
+                    "expected non-empty string",
+                );
+            }
+
+            if (
+                seenBindings.has(
+                    binding.domainId,
+                )
+            ) {
+                fail(
+                    `$.navigation.domainBindings[${index}].domainId`,
+                    "duplicate domain binding",
+                );
+            }
+
+            seenBindings.add(
+                binding.domainId,
+            );
+            navigationBindingByDomain.set(
+                binding.domainId,
+                binding.topologyId,
+            );
+
+            if (
+                typeof binding.topologyId !==
+                    "string" ||
+                !navigationContexts.has(
+                    binding.topologyId,
+                )
+            ) {
+                fail(
+                    `$.navigation.domainBindings[${index}].topologyId`,
+                    "references missing navigation topology",
+                );
+            }
+        }
+
+        const domainRoadEffects =
+            requireArray(
+                navigationRegistry
+                    .domainRoadEffects ?? [],
+                "$.navigation.domainRoadEffects",
+            );
+        const seenDomainRoadEffects =
+            new Set();
+
+        for (
+            let index = 0;
+            index <
+                domainRoadEffects.length;
+            index++
+        ) {
+            const effect =
+                requireObject(
+                    domainRoadEffects[index],
+                    `$.navigation.domainRoadEffects[${index}]`,
+                );
+            const effectPath =
+                `$.navigation.domainRoadEffects[${index}]`;
+
+            if (
+                typeof effect.domainId !==
+                    "string" ||
+                effect.domainId.length === 0
+            ) {
+                fail(
+                    `${effectPath}.domainId`,
+                    "expected non-empty string",
+                );
+            }
+
+            const topologyId =
+                navigationBindingByDomain.get(
+                    effect.domainId,
+                );
+
+            if (topologyId == null) {
+                fail(
+                    `${effectPath}.domainId`,
+                    "requires explicit navigation domain binding",
+                );
+            }
+
+            const context =
+                navigationContexts.get(
+                    topologyId,
+                );
+
+            if (
+                typeof effect.roadId !==
+                    "string" ||
+                !context?.roadIds.has(
+                    context.nodeKey(
+                        effect.roadId,
+                    ),
+                )
+            ) {
+                fail(
+                    `${effectPath}.roadId`,
+                    "references missing road in bound navigation topology",
+                );
+            }
+
+            if (
+                typeof effect.effectId !==
+                    "string" ||
+                effect.effectId.length === 0
+            ) {
+                fail(
+                    `${effectPath}.effectId`,
+                    "expected non-empty string",
+                );
+            }
+
+            requireBoolean(
+                effect.blocked,
+                `${effectPath}.blocked`,
+            );
+            requireFinite(
+                effect.costMultiplier,
+                `${effectPath}.costMultiplier`,
+            );
+
+            if (
+                effect.costMultiplier < 1
+            ) {
+                fail(
+                    `${effectPath}.costMultiplier`,
+                    "expected number >= 1",
+                );
+            }
+
+            const key =
+                `${effect.domainId}\u0000${effect.roadId}\u0000${effect.effectId}`;
+
+            if (
+                seenDomainRoadEffects.has(
+                    key,
+                )
+            ) {
+                fail(
+                    effectPath,
+                    "duplicate domain road effect",
+                );
+            }
+
+            seenDomainRoadEffects.add(
+                key,
+            );
+        }
+    } else {
+        defaultNavigationContext =
+            validateNavigationTopology(
+                navigationSnapshot,
+                "$.navigation",
+            );
+    }
+
     const world =
         requireObject(
             snapshot.world,
@@ -766,6 +1067,107 @@ export function validateWorldCoreSnapshot(
         world.obstacleCellSize,
         "$.world.obstacleCellSize",
     );
+
+    const domains =
+        requireArray(
+            world.domains ?? [
+                {
+                    id:
+                        DEFAULT_WORLD_DOMAIN_ID,
+                },
+            ],
+            "$.world.domains",
+        );
+
+    const domainIds =
+        requireUniqueIds(
+            domains,
+            "$.world.domains",
+            domain => {
+                requireObject(
+                    domain,
+                    "$.world.domains[]",
+                );
+
+                if (
+                    typeof domain.id !==
+                        "string" ||
+                    domain.id.length === 0
+                ) {
+                    fail(
+                        "$.world.domains[].id",
+                        "expected non-empty string",
+                    );
+                }
+
+                return domain.id;
+            },
+        );
+
+    if (
+        !domainIds.has(
+            "string:" +
+                DEFAULT_WORLD_DOMAIN_ID,
+        )
+    ) {
+        fail(
+            "$.world.domains",
+            `missing required default domain ${DEFAULT_WORLD_DOMAIN_ID}`,
+        );
+    }
+
+    if (navigationRegistry) {
+        for (
+            let index = 0;
+            index <
+                navigationRegistry
+                    .domainBindings.length;
+            index++
+        ) {
+            const binding =
+                navigationRegistry
+                    .domainBindings[
+                        index
+                    ];
+
+            if (
+                !domainIds.has(
+                    "string:" +
+                        binding.domainId,
+                )
+            ) {
+                fail(
+                    `$.navigation.domainBindings[${index}].domainId`,
+                    "references missing world domain",
+                );
+            }
+        }
+    }
+
+    if (navigationRegistry) {
+        const effects =
+            navigationRegistry
+                .domainRoadEffects ?? [];
+
+        for (
+            let index = 0;
+            index < effects.length;
+            index++
+        ) {
+            if (
+                !domainIds.has(
+                    "string:" +
+                        effects[index]
+                            .domainId,
+                )
+            ) {
+                fail(
+                    `$.navigation.domainRoadEffects[${index}].domainId`,
+                    "references missing world domain",
+                );
+            }
+        }
+    }
 
     const obstacles =
         requireArray(
@@ -786,180 +1188,37 @@ export function validateWorldCoreSnapshot(
         },
     );
 
-    const interestPoints =
-        requireArray(
-            world.interestPoints ?? [],
-            "$.world.interestPoints",
-        );
-
     for (
         let index = 0;
-        index <
-            interestPoints.length;
+        index < obstacles.length;
         index++
     ) {
-        requirePoint(
-            interestPoints[index],
-            `$.world.interestPoints[${index}]`,
-        );
-    }
-
-    const simulationRegions =
-        requireArray(
-            world.simulationRegions ?? [],
-            "$.world.simulationRegions",
-        );
-
-    requireUniqueIds(
-        simulationRegions,
-        "$.world.simulationRegions",
-        region => {
-            requireObject(
-                region,
-                "$.world.simulationRegions[]",
-            );
-
-            if (
-                typeof region.id !==
-                    "string" ||
-                region.id.length === 0
-            ) {
-                fail(
-                    "$.world.simulationRegions[].id",
-                    "expected non-empty string",
-                );
-            }
-
-            return region.id;
-        },
-    );
-
-    for (
-        let index = 0;
-        index < simulationRegions.length;
-        index++
-    ) {
-        const region =
-            simulationRegions[index];
-        const path =
-            `$.world.simulationRegions[${index}]`;
-
-        requireFinite(
-            region.minX,
-            `${path}.minX`,
-        );
-        requireFinite(
-            region.minY,
-            `${path}.minY`,
-        );
-        requireFinite(
-            region.maxX,
-            `${path}.maxX`,
-        );
-        requireFinite(
-            region.maxY,
-            `${path}.maxY`,
-        );
+        const domainId =
+            obstacles[index]
+                .domainId ??
+            DEFAULT_WORLD_DOMAIN_ID;
 
         if (
-            region.minX > region.maxX ||
-            region.minY > region.maxY
-        ) {
-            fail(
-                path,
-                "invalid simulation region bounds",
-            );
-        }
-
-        requireFinite(
-            region.priority,
-            `${path}.priority`,
-        );
-
-        if (
-            typeof region.detailLevel !==
+            typeof domainId !==
                 "string" ||
-            region.detailLevel.length ===
-                0
+            domainId.length === 0
         ) {
             fail(
-                `${path}.detailLevel`,
+                `$.world.obstacles[${index}].domainId`,
                 "expected non-empty string",
             );
         }
 
         if (
-            region.movementInterval !==
-            null
+            !domainIds.has(
+                "string:" +
+                    domainId,
+            )
         ) {
-            requireNonNegative(
-                region.movementInterval,
-                `${path}.movementInterval`,
-            );
-        }
-
-        requireBoolean(
-            region.enabled,
-            `${path}.enabled`,
-        );
-    }
-
-    if (
-        world.movementLodTiers !==
-        null
-    ) {
-        const tiers =
-            requireArray(
-                world.movementLodTiers,
-                "$.world.movementLodTiers",
-            );
-
-        if (tiers.length === 0) {
             fail(
-                "$.world.movementLodTiers",
-                "expected null or a non-empty array",
+                `$.world.obstacles[${index}].domainId`,
+                "references missing world domain",
             );
-        }
-
-        let previous =
-            -Infinity;
-
-        for (
-            let index = 0;
-            index < tiers.length;
-            index++
-        ) {
-            const tier =
-                requireObject(
-                    tiers[index],
-                    `$.world.movementLodTiers[${index}]`,
-                );
-            const distance =
-                tier.maxDistance ===
-                null
-                    ? Infinity
-                    : requireNonNegative(
-                        tier.maxDistance,
-                        `$.world.movementLodTiers[${index}].maxDistance`,
-                    );
-
-            if (
-                !(distance >
-                    previous)
-            ) {
-                fail(
-                    `$.world.movementLodTiers[${index}].maxDistance`,
-                    "LOD distances must increase",
-                );
-            }
-
-            requireNonNegative(
-                tier.interval,
-                `$.world.movementLodTiers[${index}].interval`,
-            );
-
-            previous =
-                distance;
         }
     }
 
@@ -1015,6 +1274,8 @@ export function validateWorldCoreSnapshot(
                 route,
             ]),
         );
+    const routeContextById =
+        new Map();
 
     for (
         let index = 0;
@@ -1025,6 +1286,63 @@ export function validateWorldCoreSnapshot(
             routes[index];
         const path =
             `$.routes[${index}]`;
+
+        let context =
+            defaultNavigationContext;
+
+        if (navigationRegistry) {
+            if (
+                typeof route.topologyId !==
+                    "string" ||
+                route.topologyId.length ===
+                    0
+            ) {
+                fail(
+                    `${path}.topologyId`,
+                    "expected navigation topology id",
+                );
+            }
+
+            context =
+                navigationContexts.get(
+                    route.topologyId,
+                ) ?? null;
+
+            if (!context) {
+                fail(
+                    `${path}.topologyId`,
+                    "references missing navigation topology",
+                );
+            }
+        } else if (
+            route.topologyId !==
+                undefined &&
+            route.topologyId !== null
+        ) {
+            fail(
+                `${path}.topologyId`,
+                "unexpected topology id for single navigation snapshot",
+            );
+        }
+
+        if (!context) {
+            fail(
+                path,
+                "no navigation topology is available for route",
+            );
+        }
+
+        routeContextById.set(
+            route.id,
+            context,
+        );
+
+        const {
+            nodeIds,
+            roadIds,
+            roadByKey,
+            nodeKey,
+        } = context;
 
         if (
             !nodeIds.has(
@@ -1195,6 +1513,12 @@ export function validateWorldCoreSnapshot(
             },
         );
 
+    const nodeKey =
+        id =>
+            typeof id +
+            ":" +
+            String(id);
+
     const entityByKey =
         new Map(
             entities.map(
@@ -1226,6 +1550,33 @@ export function validateWorldCoreSnapshot(
             `${path}.entity.position`,
         );
 
+        const entityDomainId =
+            entity.domainId ??
+            DEFAULT_WORLD_DOMAIN_ID;
+
+        if (
+            typeof entityDomainId !==
+                "string" ||
+            entityDomainId.length === 0
+        ) {
+            fail(
+                `${path}.entity.domainId`,
+                "expected non-empty string",
+            );
+        }
+
+        if (
+            !domainIds.has(
+                "string:" +
+                    entityDomainId,
+            )
+        ) {
+            fail(
+                `${path}.entity.domainId`,
+                "references missing world domain",
+            );
+        }
+
         if (
             entity.body?.radius !==
             undefined
@@ -1233,21 +1584,6 @@ export function validateWorldCoreSnapshot(
             requireNonNegative(
                 entity.body.radius,
                 `${path}.entity.body.radius`,
-            );
-        }
-
-        if (
-            entity.simulation
-                ?.movementInterval !==
-                undefined &&
-            entity.simulation
-                ?.movementInterval !==
-                null
-        ) {
-            requireNonNegative(
-                entity.simulation
-                    .movementInterval,
-                `${path}.entity.simulation.movementInterval`,
             );
         }
 
@@ -1282,6 +1618,61 @@ export function validateWorldCoreSnapshot(
                 );
             }
 
+            const route =
+                routeById.get(
+                    journey.routeId,
+                );
+            const routeContext =
+                routeContextById.get(
+                    journey.routeId,
+                );
+
+            if (
+                !route ||
+                !routeContext
+            ) {
+                fail(
+                    `${path}.journey.routeId`,
+                    "references invalid route context",
+                );
+            }
+
+            if (navigationRegistry) {
+                const domainId =
+                    entity.domainId ??
+                    DEFAULT_WORLD_DOMAIN_ID;
+                const expectedTopologyId =
+                    navigationBindingByDomain
+                        .get(domainId) ??
+                    navigationRegistry
+                        .defaultTopologyId;
+
+                if (
+                    expectedTopologyId == null
+                ) {
+                    fail(
+                        `${path}.journey`,
+                        "entity domain has no navigation topology",
+                    );
+                }
+
+                if (
+                    route.topologyId !==
+                    expectedTopologyId
+                ) {
+                    fail(
+                        `${path}.journey.routeId`,
+                        "route topology does not match entity domain binding",
+                    );
+                }
+            }
+
+            const {
+                nodeIds,
+                roadIds,
+                roadByKey,
+            } = routeContext;
+
             if (
                 !nodeIds.has(
                     nodeKey(
@@ -1294,11 +1685,6 @@ export function validateWorldCoreSnapshot(
                     "references missing node",
                 );
             }
-
-            const route =
-                routeById.get(
-                    journey.routeId,
-                );
 
             if (
                 nodeKey(
@@ -1568,264 +1954,6 @@ export function validateWorldCoreSnapshot(
             "$.movingOrder",
             "must contain every entity with an active journey exactly once",
         );
-    }
-
-    const simulationRegionAt = position => {
-        let best = null;
-        let bestArea = Infinity;
-
-        for (
-            const region of
-            simulationRegions
-        ) {
-            if (!region.enabled) {
-                continue;
-            }
-
-            if (
-                position.x < region.minX ||
-                position.x > region.maxX ||
-                position.y < region.minY ||
-                position.y > region.maxY
-            ) {
-                continue;
-            }
-
-            const area =
-                (region.maxX -
-                    region.minX) *
-                (region.maxY -
-                    region.minY);
-
-            if (
-                !best ||
-                region.priority >
-                    best.priority ||
-                (
-                    region.priority ===
-                        best.priority &&
-                    area < bestArea
-                ) ||
-                (
-                    region.priority ===
-                        best.priority &&
-                    area === bestArea &&
-                    region.id <
-                        best.id
-                )
-            ) {
-                best = region;
-                bestArea = area;
-            }
-        }
-
-        return best;
-    };
-
-    const expectedIntervals =
-        new Set();
-    const tiers =
-        world.movementLodTiers;
-    const movingIds =
-        snapshot.movingOrder;
-
-    for (const entityId of movingIds) {
-        const serialized =
-            entityByKey.get(
-                nodeKey(entityId),
-            );
-        const entity =
-            serialized.entity;
-        const explicitInterval =
-            entity.simulation
-                ?.movementInterval;
-
-        if (
-            explicitInterval !==
-            undefined &&
-            explicitInterval !== null
-        ) {
-            if (explicitInterval > 0) {
-                expectedIntervals.add(
-                    explicitInterval,
-                );
-            }
-
-            continue;
-        }
-
-        const simulationRegion =
-            simulationRegionAt(
-                entity.position,
-            );
-
-        if (
-            simulationRegion &&
-            simulationRegion.movementInterval !==
-                null
-        ) {
-            if (
-                simulationRegion.movementInterval >
-                0
-            ) {
-                expectedIntervals.add(
-                    simulationRegion.movementInterval,
-                );
-            }
-
-            continue;
-        }
-
-        if (
-            tiers &&
-            interestPoints.length > 0
-        ) {
-            let nearestSquared =
-                Infinity;
-
-            for (
-                const point of
-                interestPoints
-            ) {
-                const dx =
-                    entity.position.x -
-                    point.x;
-                const dy =
-                    entity.position.y -
-                    point.y;
-                const squared =
-                    dx * dx +
-                    dy * dy;
-
-                if (
-                    squared <
-                    nearestSquared
-                ) {
-                    nearestSquared =
-                        squared;
-                }
-            }
-
-            let selectedTier =
-                tiers[
-                    tiers.length - 1
-                ];
-
-            for (const tier of tiers) {
-                const maxDistance =
-                    tier.maxDistance ===
-                    null
-                        ? Infinity
-                        : tier.maxDistance;
-
-                if (
-                    nearestSquared <=
-                    maxDistance *
-                        maxDistance
-                ) {
-                    selectedTier =
-                        tier;
-                    break;
-                }
-            }
-
-            expectedIntervals.add(
-                selectedTier.interval,
-            );
-        }
-    }
-
-    const accumulators =
-        requireArray(
-            world.movementAccumulators ?? [],
-            "$.world.movementAccumulators",
-        );
-    const accumulatorIntervals =
-        new Set();
-
-    for (
-        let index = 0;
-        index <
-            accumulators.length;
-        index++
-    ) {
-        const pair =
-            requireArray(
-                accumulators[index],
-                `$.world.movementAccumulators[${index}]`,
-            );
-
-        if (pair.length !== 2) {
-            fail(
-                `$.world.movementAccumulators[${index}]`,
-                "expected [interval, accumulated]",
-            );
-        }
-
-        const interval =
-            requireNonNegative(
-                pair[0],
-                `$.world.movementAccumulators[${index}][0]`,
-            );
-        const accumulated =
-            requireNonNegative(
-                pair[1],
-                `$.world.movementAccumulators[${index}][1]`,
-            );
-
-        if (
-            accumulatorIntervals.has(
-                interval,
-            )
-        ) {
-            fail(
-                `$.world.movementAccumulators[${index}][0]`,
-                "duplicate movement interval",
-            );
-        }
-
-        accumulatorIntervals.add(
-            interval,
-        );
-
-        if (
-            !expectedIntervals.has(
-                interval,
-            )
-        ) {
-            fail(
-                `$.world.movementAccumulators[${index}][0]`,
-                "interval has no scheduled movers",
-            );
-        }
-
-        if (
-            interval === 0
-                ? accumulated !== 0
-                : accumulated >=
-                    interval + 1e-9
-        ) {
-            fail(
-                `$.world.movementAccumulators[${index}][1]`,
-                "accumulated time is outside scheduler range",
-            );
-        }
-    }
-
-    for (
-        const interval of
-        expectedIntervals
-    ) {
-        if (
-            !accumulatorIntervals.has(
-                interval,
-            )
-        ) {
-            fail(
-                "$.world.movementAccumulators",
-                `missing scheduled interval ${interval}`,
-            );
-        }
     }
 
     return true;

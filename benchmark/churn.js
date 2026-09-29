@@ -524,8 +524,6 @@ for (const snapshot of diagnosticSnapshots) {
         `multiCells=${snapshot.spatialMultiOccupancyCells.toLocaleString()} ` +
         `spatialMemberships=${snapshot.spatialMemberships.toLocaleString()} ` +
         `movers=${snapshot.movingEntities.toLocaleString()} ` +
-        `intervals=${snapshot.movementIntervalEntries.toLocaleString()} ` +
-        `bucketMemberships=${snapshot.movementBucketMemberships.toLocaleString()} ` +
         `radiusTracked=${snapshot.radiusTrackedEntities.toLocaleString()}`,
     );
 }

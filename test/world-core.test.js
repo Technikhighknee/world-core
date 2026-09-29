@@ -112,8 +112,6 @@ test("only active movers are tracked and completed journeys leave the active set
 
     assert.equal(world.entities.size, 1001);
     assert.equal(world.movingEntities.size, 1);
-    assert.equal(world.entityMovementIntervals.size, 0);
-    assert.equal(world.movementBuckets.size, 0);
 
     stepSimulation(world, navigation, 10);
 
@@ -327,43 +325,6 @@ test("long roads are indexed along their traversed cells instead of their full b
     assert.equal(index.queryPoint({ x: 500, y: 500 }).has("diagonal"), true);
 });
 
-test("movement LOD advances distant movers in coarse scheduled steps", () => {
-    const world = new World({
-        movementLodTiers: [
-            { maxDistance: 100, interval: 0 },
-            { maxDistance: Infinity, interval: 10 },
-        ],
-        interestPoints: [{ x: 0, y: 0 }],
-    });
-
-    const navigation = new Navigation();
-    navigation.addNode({ id: "a", x: 1000, y: 0 });
-    navigation.addNode({ id: "b", x: 1200, y: 0 });
-    navigation.addRoad({ id: "road", from: "a", to: "b" });
-
-    world.addEntity({
-        id: "far-walker",
-        position: { x: 1000, y: 0 },
-        mobility: { speed: 1 },
-    });
-
-    startJourney(world, navigation, "far-walker", "b");
-
-    for (let i = 0; i < 9; i++) {
-        stepSimulation(world, navigation, 1);
-    }
-
-    assert.equal(world.getEntity("far-walker").position.x, 1000);
-
-    stepSimulation(world, navigation, 1);
-    assert.equal(world.getEntity("far-walker").position.x, 1010);
-
-    world.setInterestPoints([{ x: 1010, y: 0 }]);
-    stepSimulation(world, navigation, 1);
-
-    assert.equal(world.getEntity("far-walker").position.x, 1011);
-});
-
 test("nearby queries ignore thousands of far-away entities", () => {
     const world = new World({ spatialCellSize: 10 });
 
@@ -446,40 +407,6 @@ test("route cache is bounded by total retained legs", () => {
     assert.equal(navigation.routeCacheLegCount, 0);
 });
 
-test("removing a moving entity clears movement scheduler state", () => {
-    const world = new World({
-        movementLodTiers: [
-            { maxDistance: Infinity, interval: 10 },
-        ],
-        interestPoints: [{ x: 0, y: 0 }],
-    });
-    const navigation = buildLineNavigation(100);
-
-    world.addEntity({
-        id: "walker",
-        position: { x: 0, y: 0 },
-        mobility: { speed: 1 },
-    });
-
-    startJourney(world, navigation, "walker", "b");
-
-    const walker = world.getEntity("walker");
-
-    assert.equal(world.movingEntities.has("walker"), true);
-    assert.strictEqual(world.movingEntities.get("walker"), walker);
-    assert.equal(world.entityMovementIntervals.has("walker"), true);
-
-    world.removeEntity("walker");
-
-    assert.equal(world.movingEntities.has("walker"), false);
-    assert.equal(world.entityMovementIntervals.has("walker"), false);
-
-    for (const bucket of world.movementBuckets.values()) {
-        assert.equal(bucket.has(walker), false);
-    }
-});
-
-
 test("world diagnostics detect and report consistent index membership", () => {
     const world = new World({ spatialCellSize: 10 });
     const navigation = buildLineNavigation(100);
@@ -502,8 +429,6 @@ test("world diagnostics detect and report consistent index membership", () => {
     assert.equal(diagnostics.entityCount, 2);
     assert.equal(diagnostics.spatialIndexedEntities, 2);
     assert.equal(diagnostics.movingEntities, 1);
-    assert.equal(diagnostics.movementIntervalEntries, 0);
-    assert.equal(diagnostics.movementBucketMemberships, 0);
     assert.equal(diagnostics.radiusTrackedEntities, 2);
 
     world.removeEntity("walker");
@@ -514,8 +439,6 @@ test("world diagnostics detect and report consistent index membership", () => {
     assert.equal(empty.entityCount, 0);
     assert.equal(empty.spatialIndexedEntities, 0);
     assert.equal(empty.movingEntities, 0);
-    assert.equal(empty.movementIntervalEntries, 0);
-    assert.equal(empty.movementBucketMemberships, 0);
     assert.equal(empty.radiusTrackedEntities, 0);
 });
 
@@ -580,49 +503,6 @@ test("mid-road journeys share cached base routes instead of copying route legs",
     assert.equal(two.prefixLeg.roadId, "ab");
     assert.notStrictEqual(one.prefixLeg, two.prefixLeg);
 });
-
-test("dynamic movement LOD schedules movers while default movement does not", () => {
-    const fullRateWorld = new World();
-    const navigation = buildLineNavigation(100);
-
-    fullRateWorld.addEntity({
-        id: "full-rate",
-        position: { x: 0, y: 0 },
-        mobility: { speed: 1 },
-    });
-
-    startJourney(fullRateWorld, navigation, "full-rate", "b");
-
-    assert.equal(fullRateWorld.movingEntities.size, 1);
-    assert.equal(fullRateWorld.entityMovementIntervals.size, 0);
-    assert.equal(fullRateWorld.movementBuckets.size, 0);
-
-    const lodWorld = new World({
-        movementLodTiers: [
-            { maxDistance: 10, interval: 0 },
-            { maxDistance: Infinity, interval: 10 },
-        ],
-        interestPoints: [{ x: 1000, y: 0 }],
-    });
-
-    lodWorld.addEntity({
-        id: "lod",
-        position: { x: 0, y: 0 },
-        mobility: { speed: 1 },
-    });
-
-    startJourney(lodWorld, navigation, "lod", "b");
-
-    assert.equal(lodWorld.movingEntities.size, 1);
-    assert.equal(lodWorld.entityMovementIntervals.get("lod"), 10);
-    assert.equal(
-        lodWorld.movementBuckets
-            .get(10)
-            ?.has(lodWorld.getEntity("lod")),
-        true,
-    );
-});
-
 
 test("dynamic spatial cells collapse back to singleton storage", () => {
     const spatial = new SpatialHash(10);
@@ -1729,11 +1609,6 @@ test("world-core snapshots survive JSON round-trips and preserve dynamic navigat
     const world = new World({
         spatialCellSize: 12,
         captureEvents: true,
-        movementLodTiers: [
-            { maxDistance: 50, interval: 0 },
-            { maxDistance: Infinity, interval: 10 },
-        ],
-        interestPoints: [{ x: 0, y: 0 }],
         localSteering: {
             enabled: true,
             neighborRadius: 3,
@@ -1788,11 +1663,6 @@ test("world-core snapshots survive JSON round-trips and preserve dynamic navigat
     assert.equal(restored.navigation.routeCache.size, 0);
     assert.equal(restored.world.peekEvents().length, 0);
     assert.equal(restored.world.captureEvents, true);
-
-    assert.equal(
-        restored.world.movementLodTiers.at(-1).maxDistance,
-        Infinity,
-    );
 
     const restoredRoad =
         restored.navigation.roads.get("ab");
@@ -1891,125 +1761,6 @@ test("snapshot restoration preserves shared active routes without restoring rout
     );
 });
 
-test("save and restore resumes to the same deterministic end state including LOD accumulator", () => {
-    function createSimulation() {
-        const navigation = new Navigation();
-
-        navigation.addNode({
-            id: "a",
-            x: 1000,
-            y: 0,
-        });
-        navigation.addNode({
-            id: "b",
-            x: 1200,
-            y: 0,
-        });
-        navigation.addRoad({
-            id: "road",
-            from: "a",
-            to: "b",
-        });
-
-        const world = new World({
-            movementLodTiers: [
-                {
-                    maxDistance: 100,
-                    interval: 0,
-                },
-                {
-                    maxDistance: Infinity,
-                    interval: 10,
-                },
-            ],
-            interestPoints: [
-                { x: 0, y: 0 },
-            ],
-        });
-
-        world.addEntity({
-            id: "walker",
-            position: { x: 1000, y: 0 },
-            mobility: {
-                profileId: "save-test",
-                speed: 1,
-            },
-        });
-
-        startJourney(
-            world,
-            navigation,
-            "walker",
-            "b",
-        );
-
-        return { world, navigation };
-    }
-
-    const uninterrupted = createSimulation();
-    const toRestore = createSimulation();
-
-    for (let i = 0; i < 7; i++) {
-        stepSimulation(
-            uninterrupted.world,
-            uninterrupted.navigation,
-            1,
-        );
-        stepSimulation(
-            toRestore.world,
-            toRestore.navigation,
-            1,
-        );
-    }
-
-    const interval = 10;
-
-    assert.equal(
-        toRestore.world.movementAccumulators.get(interval),
-        7,
-    );
-
-    const restored = deserializeWorldCore(
-        JSON.parse(
-            JSON.stringify(
-                serializeWorldCore(
-                    toRestore.world,
-                    toRestore.navigation,
-                ),
-            ),
-        ),
-    );
-
-    assert.equal(
-        restored.world.movementAccumulators.get(interval),
-        7,
-    );
-
-    for (let i = 0; i < 23; i++) {
-        stepSimulation(
-            uninterrupted.world,
-            uninterrupted.navigation,
-            1,
-        );
-        stepSimulation(
-            restored.world,
-            restored.navigation,
-            1,
-        );
-    }
-
-    assert.deepEqual(
-        serializeWorldCore(
-            restored.world,
-            restored.navigation,
-        ),
-        serializeWorldCore(
-            uninterrupted.world,
-            uninterrupted.navigation,
-        ),
-    );
-});
-
 test("unsupported snapshot versions are rejected", () => {
     assert.throws(
         () =>
@@ -2028,8 +1779,11 @@ test("package self-reference exposes only the intended public API", async () => 
     assert.deepEqual(
         Object.keys(api).sort(),
         [
+            "DEFAULT_WORLD_DOMAIN_ID",
             "MOBILITY_PROFILES",
             "Navigation",
+            "NavigationInstance",
+            "NavigationRegistry",
             "WORLD_CORE_SNAPSHOT_VERSION",
             "World",
             "computeWorldCoreStateHash",
@@ -3384,71 +3138,6 @@ test("event queue configuration can shrink safely and reset drop diagnostics", (
     );
 });
 
-test("movement interval churn does not retain empty scheduler buckets", () => {
-    const world = new World();
-    const navigation =
-        buildLineNavigation(1000);
-
-    world.addEntity({
-        id: "walker",
-        position: {
-            x: 0,
-            y: 0,
-        },
-        mobility: {
-            speed: 1,
-        },
-    });
-
-    startJourney(
-        world,
-        navigation,
-        "walker",
-        "b",
-    );
-
-    for (
-        let interval = 1;
-        interval <= 250;
-        interval++
-    ) {
-        world.setMovementInterval(
-            "walker",
-            interval,
-        );
-
-        assert.equal(
-            world.movementBuckets.size,
-            1,
-        );
-        assert.equal(
-            world.movementAccumulators.size,
-            1,
-        );
-        assert.equal(
-            world.movementBuckets.has(
-                interval,
-            ),
-            true,
-        );
-    }
-
-    world.clearMovementInterval(
-        "walker",
-    );
-
-    assert.equal(
-        world.movementBuckets.size,
-        0,
-    );
-    assert.equal(
-        world.movementAccumulators.size,
-        0,
-    );
-
-    world.assertInternalConsistency();
-});
-
 test("event queue configuration survives snapshot round-trip while pending events remain transient", () => {
     const world = new World({
         captureEvents: true,
@@ -3505,4 +3194,74 @@ test("event queue configuration survives snapshot round-trip while pending event
         restored.world.peekEvents().length,
         0,
     );
+});
+
+test("movement always advances active movers at full simulation rate", () => {
+    const world = new World();
+    const navigation = new Navigation();
+
+    navigation.addNode({ id: "a", x: 0, y: 0 });
+    navigation.addNode({ id: "b", x: 100, y: 0 });
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+    });
+
+    world.addEntity({
+        id: "near",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 1 },
+    });
+    world.addEntity({
+        id: "far",
+        position: { x: 0, y: 0 },
+        mobility: { speed: 2 },
+    });
+
+    assert.equal(
+        startJourney(
+            world,
+            navigation,
+            "near",
+            "b",
+        ),
+        true,
+    );
+    assert.equal(
+        startJourney(
+            world,
+            navigation,
+            "far",
+            "b",
+        ),
+        true,
+    );
+
+    stepSimulation(
+        world,
+        navigation,
+        1,
+    );
+
+    assert.equal(
+        world.getEntity("near")
+            .position.x,
+        1,
+    );
+    assert.equal(
+        world.getEntity("far")
+            .position.x,
+        2,
+    );
+
+    world.removeEntity("near");
+    assert.equal(
+        world.movingEntities.has(
+            "near",
+        ),
+        false,
+    );
+
+    world.assertInternalConsistency();
 });

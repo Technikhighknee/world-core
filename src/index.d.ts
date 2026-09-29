@@ -45,13 +45,14 @@ export interface Journey {
     entryPoint: Vec2 | null;
     legIndex: number;
     pointIndex: number;
-    validatedGraphRevision: number;
+    validatedGraphRevision: number | string;
     roadEntered?: boolean;
 }
 
 export interface Entity {
     id: EntityId;
     position: Vec2;
+    domainId?: string;
     kind?: string;
     body?: Body;
     mobility?: Mobility;
@@ -128,35 +129,6 @@ export type NavigationEntry =
         road: Road;
     } & Omit<RoadHit, "road">);
 
-export interface MovementLodTier {
-    maxDistance: number;
-    interval: number;
-}
-
-export interface SimulationRegion {
-    id: string;
-    minX: number;
-    minY: number;
-    maxX: number;
-    maxY: number;
-    priority: number;
-    detailLevel: string;
-    movementInterval: number | null;
-    enabled: boolean;
-}
-
-export interface SimulationRegionInput {
-    id: string;
-    minX: number;
-    minY: number;
-    maxX: number;
-    maxY: number;
-    priority?: number;
-    detailLevel?: string;
-    movementInterval?: number | null;
-    enabled?: boolean;
-}
-
 export interface LocalSteeringOptions {
     enabled?: boolean;
     neighborRadius?: number;
@@ -184,12 +156,21 @@ export type EventOverflowPolicy =
     | "drop-oldest"
     | "throw";
 
+export interface WorldDomainInput {
+    id: string;
+}
+
+export interface WorldDomain {
+    id: string;
+    readonly handle: number;
+    readonly entityCount: number;
+    readonly maxEntityRadius: number;
+}
+
 export interface WorldOptions {
     spatialCellSize?: number;
     obstacleCellSize?: number;
-    movementLodTiers?: readonly MovementLodTier[] | null;
-    interestPoints?: readonly Vec2[];
-    simulationRegions?: readonly SimulationRegionInput[];
+    domains?: readonly WorldDomainInput[];
     localSteering?: LocalSteeringOptions | null;
     captureEvents?: boolean;
     eventQueueLimit?: number;
@@ -249,6 +230,7 @@ export interface SpatialQueryBuffer<T extends Entity = Entity> {
 export interface EntityQueryOptions<T extends Entity = Entity> {
     excludeId?: EntityId | null;
     predicate?: ((entity: T) => boolean) | null;
+    domainId?: string | null;
 }
 
 export interface NearestEntityResult<T extends Entity = Entity> {
@@ -263,35 +245,34 @@ export interface WorldDiagnostics {
     spatialCellCount: number;
     spatialMemberships: number;
     spatialMultiOccupancyCells: number;
+    domainCount: number;
+    occupiedSpatialDomainCount: number;
     movingEntities: number;
-    movementIntervalEntries: number;
-    movementBucketCount: number;
-    movementBucketMemberships: number;
     radiusTrackedEntities: number;
     radiusCountEntries: number;
     maxEntityRadius: number;
     obstacleCount: number;
     obstacleIndexMemberships: number;
+    occupiedObstacleDomainCount: number;
     eventQueueSize: number;
     eventQueueLimit: number;
     droppedEventCount: number;
-    simulationRegionCount: number;
-    scheduledSimulationRegionCount: number;
 }
+
+export const DEFAULT_WORLD_DOMAIN_ID: "default";
 
 export class World<T extends Entity = Entity> {
     constructor(options?: WorldOptions);
 
     time: number;
     readonly entities: Map<EntityId, T>;
+    readonly domains: Map<string, WorldDomain>;
     readonly movingEntities: Map<EntityId, T>;
     captureEvents: boolean;
     eventQueueLimit: number;
     eventOverflowPolicy: EventOverflowPolicy;
     droppedEventCount: number;
     localSteering: LocalSteeringConfig | { enabled: false } | null;
-    interestPoints: Vec2[];
-    readonly simulationRegions: Map<string, SimulationRegion>;
 
     configureEventQueue(options?: {
         limit?: number;
@@ -312,7 +293,12 @@ export class World<T extends Entity = Entity> {
     drainEvents(target?: WorldEvent[]): WorldEvent[];
     peekEvents(): WorldEvent[];
 
-    addObstacle(obstacle: Obstacle): Obstacle;
+    addObstacle(
+        obstacle: Obstacle,
+        options?: { domainId?: string },
+    ): Obstacle;
+    getObstacle(obstacleId: EntityId): Obstacle | undefined;
+    getObstacleDomain(obstacleId: EntityId): string | null;
     removeObstacle(obstacleId: EntityId): boolean;
     setObstacleEnabled(obstacleId: EntityId, enabled: boolean): boolean;
     replaceObstacle(obstacleId: EntityId, patch: Partial<Obstacle>): Obstacle;
@@ -323,12 +309,25 @@ export class World<T extends Entity = Entity> {
         options?: {
             includeDisabled?: boolean;
             predicate?: ((obstacle: Obstacle) => boolean) | null;
+            domainId?: string;
         },
     ): Obstacle[];
+
+    addDomain(input: WorldDomainInput): WorldDomain;
+    removeDomain(domainId: string): boolean;
+    getDomain(domainId: string): WorldDomain | undefined;
+    getEntityDomain(entityId: EntityId): WorldDomain | null;
 
     addEntity(entity: T): T;
     removeEntity(entityId: EntityId): boolean;
     getEntity(entityId: EntityId): T | undefined;
+    transferEntity(
+        entityId: EntityId,
+        target: {
+            domainId: string;
+            position: Vec2;
+        },
+    ): T;
     setPosition(entityId: EntityId, position: Vec2): void;
     setPositionXY(entityId: EntityId, x: number, y: number): void;
     setEntityPositionXY(entity: T, x: number, y: number): void;
@@ -336,25 +335,6 @@ export class World<T extends Entity = Entity> {
 
     configureLocalSteering(options?: LocalSteeringOptions): LocalSteeringConfig;
     disableLocalSteering(): void;
-
-    addSimulationRegion(
-        region: SimulationRegionInput,
-        options?: { refresh?: boolean },
-    ): SimulationRegion;
-    replaceSimulationRegion(
-        regionId: string,
-        patch: Partial<SimulationRegionInput>,
-    ): SimulationRegion;
-    removeSimulationRegion(regionId: string): boolean;
-    simulationRegionAt(position: Vec2): SimulationRegion | null;
-    getEntitySimulationRegion(entityId: EntityId): SimulationRegion | null;
-
-    configureMovementLod(tiers: readonly MovementLodTier[]): void;
-    setInterestPoints(points: readonly Vec2[]): void;
-    setMovementInterval(entityId: EntityId, interval: number): void;
-    clearMovementInterval(entityId: EntityId): void;
-    hasDynamicMovementLod(): boolean;
-    refreshAllMovementLod(): void;
 
     createSpatialQueryBuffer(): SpatialQueryBuffer<T>;
     queryRadiusInto(
@@ -413,12 +393,163 @@ export class World<T extends Entity = Entity> {
             maxDistance?: number;
             excludeId?: EntityId | null;
             predicate?: ((entity: T) => boolean) | null;
+            domainId?: string | null;
         },
     ): NearestEntityResult<T> | null;
 
     getDiagnostics(): WorldDiagnostics;
     assertInternalConsistency(): WorldDiagnostics;
 }
+
+export interface NavigationInstanceDiagnostics {
+    domainId: string;
+    topologyId: string;
+    revision: number;
+    overrideRoadCount: number;
+    overrideEffectCount: number;
+}
+
+export class NavigationInstance {
+    readonly domainId: string;
+    readonly topologyId: string;
+    readonly topology: Navigation;
+    readonly roadEffects: Map<
+        NavigationId,
+        Map<string, RoadEffect>
+    >;
+    readonly nodes: Map<NavigationId, NavigationNode>;
+    readonly roads: Map<NavigationId, Road>;
+    readonly graphRevision: string;
+    readonly revision: number;
+    readonly overrideRoadCount: number;
+    readonly overrideEffectCount: number;
+
+    setRoadEffect(
+        effectId: string,
+        roadId: NavigationId,
+        effect?: Partial<RoadEffect>,
+    ): boolean;
+    removeRoadEffect(
+        effectId: string,
+        roadId: NavigationId,
+    ): boolean;
+    clearRoadEffect(effectId: string): boolean;
+    roadCostMultiplier(road: NavigationId | Road): number;
+    canTraverseRoad(
+        road: NavigationId | Road,
+        mobility: Mobility,
+    ): boolean;
+    isRouteLegCurrent(
+        leg: RouteLeg,
+        mobility: Mobility,
+    ): boolean;
+    isRouteCurrent(
+        route: Route,
+        mobility: Mobility,
+        startLegIndex?: number,
+    ): boolean;
+    adoptRoute(route: Route): Route;
+    nodeAt(position: Vec2, tolerance?: number): NavigationNode | null;
+    nearestNode(position: Vec2): NavigationNode | null;
+    nearestNodeWithDistance(position: Vec2): {
+        node: NavigationNode;
+        distance: number;
+    } | null;
+    roadAt(
+        position: Vec2,
+        extraTolerance?: number,
+        options?: {
+            includeDisabled?: boolean;
+        },
+    ): RoadHit | null;
+    findNavigationEntries(
+        position: Vec2,
+        mobility: Mobility,
+        options?: {
+            maxDistance?: number;
+            maxEntries?: number;
+        },
+    ): NavigationEntry[];
+    findRouteFromPosition(
+        position: Vec2,
+        destinationNodeId: NavigationId,
+        mobility: Mobility,
+        options?: JourneyStartOptions,
+    ): RoutePlan | null;
+    findHierarchicalRoute(
+        startNodeId: NavigationId,
+        destinationNodeId: NavigationId,
+        mobility: Mobility,
+    ): Route | null;
+    findRoute(
+        startNodeId: NavigationId,
+        destinationNodeId: NavigationId,
+        mobility: Mobility,
+    ): Route | null;
+    getDiagnostics(): NavigationInstanceDiagnostics;
+    assertInternalConsistency(): NavigationInstanceDiagnostics;
+}
+
+export interface NavigationRegistryDiagnostics {
+    topologyCount: number;
+    boundDomainCount: number;
+    referencedTopologyCount: number;
+    overriddenDomainCount: number;
+    overrideRoadCount: number;
+    overrideEffectCount: number;
+    defaultTopologyId: string | null;
+}
+
+export class NavigationRegistry {
+    constructor(options?: {
+        defaultTopologyId?: string | null;
+    });
+
+    readonly topologies: Map<string, Navigation>;
+    readonly domainBindings: Map<string, string>;
+    readonly domainInstances: Map<string, NavigationInstance>;
+    defaultTopologyId: string | null;
+
+    registerTopology(id: string, navigation: Navigation): Navigation;
+    removeTopology(id: string): boolean;
+    setDefaultTopology(id: string): void;
+    bindDomain(domainId: string, topologyId: string): Navigation;
+    unbindDomain(domainId: string): boolean;
+    topologyIdForDomain(domainId?: string): string | null;
+    setDomainRoadEffect(
+        domainId: string,
+        effectId: string,
+        roadId: NavigationId,
+        effect?: Partial<RoadEffect>,
+    ): NavigationInstance | null;
+    removeDomainRoadEffect(
+        domainId: string,
+        effectId: string,
+        roadId: NavigationId,
+    ): boolean;
+    clearDomainRoadEffect(
+        domainId: string,
+        effectId: string,
+    ): boolean;
+    clearDomainOverrides(domainId: string): boolean;
+    navigationForDomain(
+        domainId?: string,
+    ): Navigation | NavigationInstance | null;
+    navigationForEntity(
+        entity: Entity,
+    ): Navigation | NavigationInstance | null;
+    getDiagnostics(): NavigationRegistryDiagnostics;
+    assertInternalConsistency(): NavigationRegistryDiagnostics;
+}
+
+export type NavigationSource =
+    | Navigation
+    | NavigationInstance
+    | NavigationRegistry;
+
+export type SerializableNavigationSource =
+    | Navigation
+    | NavigationRegistry;
 
 export interface NavigationOptions {
     spatialCellSize?: number;
@@ -575,7 +706,7 @@ export interface JourneyStartOptions {
 
 export function startJourney(
     world: World,
-    navigation: Navigation,
+    navigation: NavigationSource,
     entityId: EntityId,
     destinationNodeId: NavigationId,
     options?: JourneyStartOptions,
@@ -583,7 +714,7 @@ export function startJourney(
 
 export function rerouteJourney(
     world: World,
-    navigation: Navigation,
+    navigation: NavigationSource,
     entityId: EntityId,
     destinationNodeId: NavigationId,
     options?: JourneyStartOptions,
@@ -597,13 +728,13 @@ export function stopJourney(
 export type SimulationSystem =
     (
         world: World,
-        navigation: Navigation,
+        navigation: NavigationSource,
         deltaSeconds: number,
     ) => void;
 
 export function stepSimulation(
     world: World,
-    navigation: Navigation,
+    navigation: NavigationSource,
     deltaSeconds: number,
     systems?: readonly SimulationSystem[],
 ): void;
@@ -640,14 +771,14 @@ export interface WorldCoreSnapshot {
 
 export function serializeWorldCore(
     world: World,
-    navigation: Navigation,
+    navigation: SerializableNavigationSource,
 ): WorldCoreSnapshot;
 
 export function deserializeWorldCore(
     snapshot: unknown,
 ): {
     world: World;
-    navigation: Navigation;
+    navigation: SerializableNavigationSource;
 };
 
 export const WORLD_CORE_SNAPSHOT_VERSION: number;
@@ -669,10 +800,10 @@ export interface WorldCoreStateHashes {
 
 export function computeWorldCoreStateHash(
     world: World,
-    navigation: Navigation,
+    navigation: SerializableNavigationSource,
 ): string;
 
 export function computeWorldCoreStateHashes(
     world: World,
-    navigation: Navigation,
+    navigation: SerializableNavigationSource,
 ): WorldCoreStateHashes;

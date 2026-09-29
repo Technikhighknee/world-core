@@ -2,6 +2,9 @@ import {
     applyLocalSteering,
     createLocalSteeringContext,
 } from "./local-steering.js";
+import {
+    navigationForEntity,
+} from "./navigation-registry.js";
 
 const EPSILON = 0.000001;
 const EPSILON_SQUARED = EPSILON * EPSILON;
@@ -162,7 +165,13 @@ export function startJourney(
         throw new Error(`Entity ${entityId} cannot move`);
     }
 
-    const planned = navigation.findRouteFromPosition(
+    const entityNavigation =
+        navigationForEntity(
+            navigation,
+            entity,
+        );
+
+    const planned = entityNavigation.findRouteFromPosition(
         entity.position,
         destinationNodeId,
         entity.mobility,
@@ -173,7 +182,7 @@ export function startJourney(
 
     return beginJourney(
         world,
-        navigation,
+        entityNavigation,
         entity,
         destinationNodeId,
         planned,
@@ -198,7 +207,13 @@ export function rerouteJourney(
         throw new Error(`Entity ${entityId} cannot move`);
     }
 
-    const planned = navigation.findRouteFromPosition(
+    const entityNavigation =
+        navigationForEntity(
+            navigation,
+            entity,
+        );
+
+    const planned = entityNavigation.findRouteFromPosition(
         entity.position,
         destinationNodeId,
         entity.mobility,
@@ -209,7 +224,7 @@ export function rerouteJourney(
 
     return beginJourney(
         world,
-        navigation,
+        entityNavigation,
         entity,
         destinationNodeId,
         planned,
@@ -246,86 +261,76 @@ export function stopJourney(entity, world = null) {
     world?.unmarkMoving(entity.id);
 }
 
-export function updateMovement(world, navigation, deltaSeconds) {
-    const refreshDynamicLod = world.hasDynamicMovementLod();
-    const reclassify = world.movementReclassifyScratch;
+export function updateMovement(
+    world,
+    navigation,
+    deltaSeconds,
+) {
+    const entities =
+        [...world.movingEntities.values()];
 
-    if (refreshDynamicLod) {
-        reclassify.length = 0;
-    }
+    for (const entity of entities) {
+        const entityId = entity.id;
 
-    world.forEachDueMovementBatch(
-        deltaSeconds,
-        (entities, elapsedSeconds, skipEntityIds) => {
-            for (const entity of entities) {
-                const entityId = entity.id;
+        if (!entity.journey) {
+            world.unmarkMoving(
+                entityId,
+            );
+            continue;
+        }
 
-                if (skipEntityIds?.has(entityId)) continue;
+        const entityNavigation =
+            navigationForEntity(
+                navigation,
+                entity,
+            );
+        const journey =
+            entity.journey;
 
-                if (!entity.journey) {
-                    world.unmarkMoving(entityId);
+        if (
+            journey.validatedGraphRevision !==
+            entityNavigation.graphRevision
+        ) {
+            const prefixCurrent =
+                !journey.prefixLeg ||
+                entityNavigation.isRouteLegCurrent(
+                    journey.prefixLeg,
+                    entity.mobility,
+                );
+
+            const routeCurrent =
+                entityNavigation.isRouteCurrent(
+                    journey.route,
+                    entity.mobility,
+                    journey.legIndex,
+                );
+
+            if (
+                !prefixCurrent ||
+                !routeCurrent
+            ) {
+                if (
+                    !replanInvalidJourney(
+                        world,
+                        navigation,
+                        entity,
+                    )
+                ) {
                     continue;
                 }
-
-                const journey = entity.journey;
-
-                if (
-                    journey.validatedGraphRevision !==
-                    navigation.graphRevision
-                ) {
-                    const prefixCurrent =
-                        !journey.prefixLeg ||
-                        navigation.isRouteLegCurrent(
-                            journey.prefixLeg,
-                            entity.mobility,
-                        );
-
-                    const routeCurrent =
-                        navigation.isRouteCurrent(
-                            journey.route,
-                            entity.mobility,
-                            journey.legIndex,
-                        );
-
-                    if (
-                        !prefixCurrent ||
-                        !routeCurrent
-                    ) {
-                        if (
-                            !replanInvalidJourney(
-                                world,
-                                navigation,
-                                entity,
-                            )
-                        ) {
-                            continue;
-                        }
-                    } else {
-                        journey.validatedGraphRevision =
-                            navigation.graphRevision;
-                    }
-                }
-
-                moveEntity(world, navigation, entity, elapsedSeconds);
-
-                if (
-                    refreshDynamicLod &&
-                    entity.journey &&
-                    entity.simulation?.movementInterval == null
-                ) {
-                    reclassify.push(entityId);
-                }
+            } else {
+                journey.validatedGraphRevision =
+                    entityNavigation.graphRevision;
             }
-        },
-    );
+        }
 
-    if (!refreshDynamicLod) return;
-
-    for (let i = 0; i < reclassify.length; i++) {
-        world.refreshEntityMovementLod(reclassify[i]);
+        moveEntity(
+            world,
+            entityNavigation,
+            entity,
+            deltaSeconds,
+        );
     }
-
-    reclassify.length = 0;
 }
 
 function finishJourney(world, entity) {
@@ -391,12 +396,20 @@ function replanInvalidJourney(
         entity.mobility.navigationEntryMaxDistance ??
         0;
 
-    const planned = navigation.findRouteFromPosition(
-        entity.position,
-        destinationNodeId,
-        entity.mobility,
-        { entryMaxDistance },
-    );
+    const entityNavigation =
+        navigationForEntity(
+            navigation,
+            entity,
+        );
+
+    const planned =
+        entityNavigation
+            .findRouteFromPosition(
+                entity.position,
+                destinationNodeId,
+                entity.mobility,
+                { entryMaxDistance },
+            );
 
     if (!planned) {
         invalidateJourney(
@@ -409,7 +422,7 @@ function replanInvalidJourney(
 
     beginJourney(
         world,
-        navigation,
+        entityNavigation,
         entity,
         destinationNodeId,
         planned,
@@ -792,7 +805,6 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             entity,
             x,
             y,
-            false,
         );
     }
 }

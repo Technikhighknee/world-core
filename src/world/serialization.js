@@ -2,7 +2,15 @@ import {
     MOBILITY_PROFILES,
 } from "./mobility-profiles.js";
 import { Navigation } from "./navigation.js";
-import { World } from "./world.js";
+import {
+    NavigationInstance,
+    NavigationRegistry,
+    navigationForEntity,
+} from "./navigation-registry.js";
+import {
+    DEFAULT_WORLD_DOMAIN_ID,
+    World,
+} from "./world.js";
 import {
     validateWorldCoreSnapshot,
 } from "./snapshot-validation.js";
@@ -213,33 +221,197 @@ function deserializeNavigation(data) {
     return navigation;
 }
 
-function serializeLodTiers(world) {
-    if (!world.movementLodTiers) return null;
+function serializeNavigationSource(
+    navigation,
+) {
+    if (
+        navigation instanceof
+        NavigationInstance
+    ) {
+        throw new Error(
+            "A standalone NavigationInstance cannot be serialized as a world navigation root; serialize its NavigationRegistry instead",
+        );
+    }
 
-    return world.movementLodTiers.map(
-        tier => ({
-            maxDistance:
-                Number.isFinite(
-                    tier.maxDistance,
-                )
-                    ? tier.maxDistance
-                    : null,
-            interval: tier.interval,
-        }),
+    if (
+        navigation instanceof
+        NavigationRegistry
+    ) {
+        navigation.assertInternalConsistency();
+
+        return {
+            type: "registry",
+            defaultTopologyId:
+                navigation.defaultTopologyId,
+            topologies:
+                [...navigation.topologies]
+                    .sort(
+                        ([a], [b]) =>
+                            a.localeCompare(b),
+                    )
+                    .map(
+                        ([
+                            id,
+                            topology,
+                        ]) => ({
+                            id,
+                            navigation:
+                                serializeNavigation(
+                                    topology,
+                                ),
+                        }),
+                    ),
+            domainBindings:
+                [...navigation.domainBindings]
+                    .sort(
+                        ([a], [b]) =>
+                            a.localeCompare(b),
+                    )
+                    .map(
+                        ([
+                            domainId,
+                            topologyId,
+                        ]) => ({
+                            domainId,
+                            topologyId,
+                        }),
+                    ),
+            domainRoadEffects:
+                [...navigation.domainInstances]
+                    .sort(
+                        ([a], [b]) =>
+                            a.localeCompare(b),
+                    )
+                    .flatMap(
+                        ([
+                            domainId,
+                            instance,
+                        ]) =>
+                            [...instance.roadEffects]
+                                .sort(
+                                    ([a], [b]) =>
+                                        a.localeCompare(b),
+                                )
+                                .flatMap(
+                                    ([
+                                        roadId,
+                                        effects,
+                                    ]) =>
+                                        [...effects]
+                                            .sort(
+                                                ([a], [b]) =>
+                                                    a.localeCompare(b),
+                                            )
+                                            .map(
+                                                ([
+                                                    effectId,
+                                                    effect,
+                                                ]) => ({
+                                                    domainId,
+                                                    roadId,
+                                                    effectId,
+                                                    blocked:
+                                                        effect.blocked,
+                                                    costMultiplier:
+                                                        effect.costMultiplier,
+                                                }),
+                                            ),
+                                ),
+                    ),
+        };
+    }
+
+    return serializeNavigation(
+        navigation,
     );
+}
+
+function deserializeNavigationSource(
+    data,
+) {
+    if (data?.type !== "registry") {
+        return deserializeNavigation(
+            data,
+        );
+    }
+
+    const registry =
+        new NavigationRegistry();
+
+    for (
+        const topology of
+        data.topologies
+    ) {
+        registry.registerTopology(
+            topology.id,
+            deserializeNavigation(
+                topology.navigation,
+            ),
+        );
+    }
+
+    if (
+        data.defaultTopologyId != null
+    ) {
+        registry.setDefaultTopology(
+            data.defaultTopologyId,
+        );
+    }
+
+    for (
+        const binding of
+        data.domainBindings ?? []
+    ) {
+        registry.bindDomain(
+            binding.domainId,
+            binding.topologyId,
+        );
+    }
+
+    for (
+        const effect of
+        data.domainRoadEffects ?? []
+    ) {
+        registry.setDomainRoadEffect(
+            effect.domainId,
+            effect.effectId,
+            effect.roadId,
+            {
+                blocked:
+                    effect.blocked,
+                costMultiplier:
+                    effect.costMultiplier,
+            },
+        );
+    }
+
+    registry.assertInternalConsistency();
+    return registry;
 }
 
 function serializeObstacles(world) {
     return [
-        ...world.obstacles
-            .obstacles.values(),
+        ...world.obstacleDomains.entries(),
     ]
-        .sort((a, b) =>
-            String(a.id).localeCompare(
-                String(b.id),
-            ))
-        .map(obstacle =>
-            clone(obstacle));
+        .sort(
+            ([a], [b]) =>
+                String(a).localeCompare(
+                    String(b),
+                ),
+        )
+        .map(
+            ([
+                obstacleId,
+                domainId,
+            ]) => ({
+                ...clone(
+                    world.getObstacle(
+                        obstacleId,
+                    ),
+                ),
+                domainId,
+            }),
+        );
 }
 
 function deserializeObstacles(
@@ -247,20 +419,36 @@ function deserializeObstacles(
     obstacles,
 ) {
     for (
-        const obstacle of
+        const serialized of
         obstacles ?? []
     ) {
+        const {
+            domainId,
+            ...obstacle
+        } = clone(serialized);
+
         world.addObstacle(
-            clone(obstacle),
+            obstacle,
+            {
+                domainId:
+                    domainId ??
+                    DEFAULT_WORLD_DOMAIN_ID,
+            },
         );
     }
 }
 
-function serializeEntities(world) {
+function serializeEntities(
+    world,
+    navigation,
+) {
     const routeIds = new Map();
     const routes = [];
 
-    function registerRoute(route) {
+    function registerRoute(
+        route,
+        topologyId,
+    ) {
         let routeId = routeIds.get(route);
 
         if (routeId != null) {
@@ -272,6 +460,8 @@ function serializeEntities(world) {
 
         routes.push({
             id: routeId,
+            topologyId:
+                topologyId ?? null,
             startNodeId: route.startNodeId,
             destinationNodeId:
                 route.destinationNodeId,
@@ -306,10 +496,33 @@ function serializeEntities(world) {
                     ...journeyRest
                 } = journey;
 
+                const topologyId =
+                    navigation instanceof
+                    NavigationRegistry
+                        ? navigation
+                            .topologyIdForDomain(
+                                entity.domainId ??
+                                    DEFAULT_WORLD_DOMAIN_ID,
+                            )
+                        : null;
+
+                if (
+                    navigation instanceof
+                        NavigationRegistry &&
+                    topologyId == null
+                ) {
+                    throw new Error(
+                        `Cannot serialize active journey without navigation topology: ${String(entity.id)}`,
+                    );
+                }
+
                 serializedJourney = {
                     ...clone(journeyRest),
                     routeId:
-                        registerRoute(route),
+                        registerRoute(
+                            route,
+                            topologyId,
+                        ),
                 };
             }
 
@@ -339,17 +552,28 @@ function deserializeEntities(
     const routes = new Map();
 
     for (const routeData of data.routes) {
-        routes.set(routeData.id, {
-            startNodeId:
-                routeData.startNodeId,
-            destinationNodeId:
-                routeData.destinationNodeId,
-            legs: routeData.legs.map(
-                leg => ({ ...leg }),
-            ),
-            estimatedSeconds:
-                routeData.estimatedSeconds,
-        });
+        routes.set(
+            routeData.id,
+            {
+                topologyId:
+                    routeData.topologyId ??
+                    null,
+                route: {
+                    startNodeId:
+                        routeData.startNodeId,
+                    destinationNodeId:
+                        routeData.destinationNodeId,
+                    legs:
+                        routeData.legs.map(
+                            leg => ({
+                                ...leg,
+                            }),
+                        ),
+                    estimatedSeconds:
+                        routeData.estimatedSeconds,
+                },
+            },
+        );
     }
 
     const serializedById =
@@ -402,13 +626,13 @@ function deserializeEntities(
             world.addEntity(entity);
 
         if (serialized.journey) {
-            const route =
+            const routeRecord =
                 routes.get(
                     serialized.journey
                         .routeId,
                 );
 
-            if (!route) {
+            if (!routeRecord) {
                 throw new Error(
                     `Missing serialized route ${serialized.journey.routeId}`,
                 );
@@ -420,11 +644,44 @@ function deserializeEntities(
             } =
                 serialized.journey;
 
+            const entityNavigation =
+                navigationForEntity(
+                    navigation,
+                    stored,
+                );
+
+            if (
+                navigation instanceof
+                    NavigationRegistry
+            ) {
+                const expectedTopologyId =
+                    navigation
+                        .topologyIdForDomain(
+                            stored.domainId,
+                        );
+
+                if (
+                    routeRecord.topologyId !==
+                    expectedTopologyId
+                ) {
+                    throw new Error(
+                        `Serialized route topology mismatch for entity: ${String(stored.id)}`,
+                    );
+                }
+            }
+
+            entityNavigation
+                .adoptRoute?.(
+                    routeRecord.route,
+                );
+
             stored.journey = {
                 ...clone(journeyRest),
-                route,
+                route:
+                    routeRecord.route,
                 validatedGraphRevision:
-                    navigation.graphRevision,
+                    entityNavigation
+                        .graphRevision,
             };
 
             pendingJourneys.set(
@@ -479,34 +736,38 @@ export function serializeWorldCore(
     navigation,
 ) {
     const entityData =
-        serializeEntities(world);
+        serializeEntities(
+            world,
+            navigation,
+        );
 
     return {
         format: FORMAT,
         version: FORMAT_VERSION,
 
         navigation:
-            serializeNavigation(navigation),
+            serializeNavigationSource(
+                navigation,
+            ),
 
         world: {
             time: world.time,
+            domains:
+                [...world.domains.values()]
+                    .sort(
+                        (a, b) =>
+                            a.handle -
+                            b.handle,
+                    )
+                    .map(domain => ({
+                        id: domain.id,
+                    })),
             spatialCellSize:
                 world.spatial.cellSize,
             obstacleCellSize:
                 world.obstacles.index.cellSize,
             obstacles:
                 serializeObstacles(world),
-            movementLodTiers:
-                serializeLodTiers(world),
-            simulationRegions:
-                [...world.simulationRegions.values()]
-                    .sort((a, b) =>
-                        a.id.localeCompare(b.id))
-                    .map(region => ({
-                        ...region,
-                    })),
-            interestPoints:
-                clone(world.interestPoints),
             localSteering:
                 clone(world.localSteering),
             captureEvents:
@@ -515,12 +776,6 @@ export function serializeWorldCore(
                 world.eventQueueLimit,
             eventOverflowPolicy:
                 world.eventOverflowPolicy,
-            movementAccumulators:
-                [...world.movementAccumulators]
-                    .sort(
-                        ([a], [b]) =>
-                            a - b,
-                    ),
         },
 
         routes: entityData.routes,
@@ -546,7 +801,7 @@ export function deserializeWorldCore(
     );
 
     const navigation =
-        deserializeNavigation(
+        deserializeNavigationSource(
             snapshot.navigation,
         );
 
@@ -555,12 +810,8 @@ export function deserializeWorldCore(
             snapshot.world.spatialCellSize,
         obstacleCellSize:
             snapshot.world.obstacleCellSize,
-        movementLodTiers:
-            snapshot.world.movementLodTiers,
-        simulationRegions:
-            snapshot.world.simulationRegions ?? [],
-        interestPoints:
-            snapshot.world.interestPoints,
+        domains:
+            snapshot.world.domains ?? [],
         localSteering:
             snapshot.world.localSteering,
         captureEvents:
@@ -591,25 +842,24 @@ export function deserializeWorldCore(
         },
     );
 
-    for (
-        const [interval, accumulated] of
-        snapshot.world
-            .movementAccumulators ?? []
-    ) {
-        if (
-            world.movementAccumulators.has(
-                interval,
-            )
-        ) {
-            world.movementAccumulators.set(
-                interval,
-                accumulated,
-            );
-        }
-    }
 
     world.events.length = 0;
-    navigation.invalidateAllRoutes();
+
+    if (
+        navigation instanceof
+        NavigationRegistry
+    ) {
+        for (
+            const topology of
+            navigation.topologies.values()
+        ) {
+            topology.invalidateAllRoutes();
+        }
+
+        navigation.assertInternalConsistency();
+    } else {
+        navigation.invalidateAllRoutes();
+    }
 
     world.assertInternalConsistency();
 

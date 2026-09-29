@@ -8,6 +8,7 @@ A rendering-independent 2D world, navigation and movement simulation core.
 import {
   World,
   Navigation,
+  NavigationRegistry,
   mobilityProfile,
   startJourney,
   rerouteJourney,
@@ -27,7 +28,7 @@ The world stores actual entity coordinates. Navigation is a separate graph used 
 - `World.entities` is the master entity registry.
 - Active movement is tracked separately from the full population.
 - Movement advances numeric `x/y` state without temporary Vec2/object allocations in the hot loop and commits each entity position at most once per processed movement update.
-- Movement LOD supports full-detail nearby movers and coarse scheduled updates for distant movers.
+- Active movers always advance with the simulation delta; detail and scheduling policy is intentionally external to world-core.
 - Optional local steering uses nearby spatial occupancy for lateral separation inside the road corridor and derives congestion speed penalties from actual local bodies rather than a precomputed road congestion flag.
 - Dynamic entity lookups use a spatial hash. World entities are indexed by center cell only; body radius is handled by query expansion plus exact distance checks, so large bodies remain query-correct without duplicating dynamic memberships across neighboring cells. Moving inside the same center cell does not rewrite hash buckets.
 - Normal cell coordinates use packed numeric keys instead of transient string keys, and singleton cells store the entity ID directly instead of allocating a Set.
@@ -44,6 +45,62 @@ The world stores actual entity coordinates. Navigation is a separate graph used 
 - Journeys can start and re-route while an entity is already in the middle of a road.
 - `nearestNode()` consistently returns a node; `nearestNodeWithDistance()` returns node plus distance.
 
+## Spatial domains and shared interior topology
+
+A single `World` can contain many isolated local 2D coordinate spaces. Domains are addresses inside one simulation, not separate `World` instances.
+
+```js
+const world = new World();
+
+world.addDomain({ id: "tavern-17-ground" });
+world.addDomain({ id: "tavern-17-cellar" });
+
+world.addEntity({
+  id: "hans",
+  domainId: "tavern-17-ground",
+  position: { x: 2, y: 4 },
+  mobility: mobilityProfile("pedestrian")
+});
+```
+
+Normal spatial queries never cross domain boundaries. Identical local coordinates in two interiors are unrelated spatial locations. Empty domains allocate no spatial cells, and movement iterates active movers rather than all registered domains.
+
+`transferEntity()` atomically changes an entity's domain and local position. Any active journey is cancelled because a route belongs to one navigation topology.
+
+```js
+world.transferEntity("hans", {
+  domainId: "tavern-17-cellar",
+  position: { x: 1, y: 3 }
+});
+```
+
+Many domains can share one navigation graph through `NavigationRegistry`. This is intended for repeated interior layouts: 50,000 house instances can bind to one stored graph rather than cloning nodes, roads, static indexes and route caches 50,000 times.
+
+```js
+const houseLayout = new Navigation();
+// define the shared layout once
+
+const navigation = new NavigationRegistry();
+navigation.registerTopology("small-house", houseLayout);
+navigation.bindDomain("house-1", "small-house");
+navigation.bindDomain("house-2", "small-house");
+```
+
+A registered topology is shared state: mutating that `Navigation` changes it for every bound domain. Domain-specific routing state is a sparse overlay rather than a graph clone. A `NavigationInstance` is created lazily only when a bound domain actually has an override:
+
+```js
+navigation.setDomainRoadEffect(
+  "house-1",
+  "locked-bedroom-door",
+  "hall-bedroom",
+  { blocked: true }
+);
+```
+
+`house-2` still uses the shared topology directly. Clearing the last override removes the instance again. Dynamic obstacles follow the same sparse domain model; static repeated geometry belongs in shared topology data.
+
+Snapshots remain format version 1. Registry snapshots store each shared navigation topology once, persist domain-to-topology bindings and sparse domain road effects, and tag active journey routes with their topology identity.
+
 ## Benchmarking
 
 ```bash
@@ -51,9 +108,13 @@ npm run bench
 npm run bench:churn
 npm run bench:soak
 npm run bench:retention
+npm run bench:domains
+npm run bench:domain-movement
 ```
 
 All benchmarks run with `--expose-gc`. This is intentional: the reports distinguish memory that is merely waiting for garbage collection from memory that remains reachable after forced full collections.
+
+`npm run bench:domains` specifically measures large-domain overhead. Its default workload creates 100,000 domains, binds them to one shared navigation topology, adds sparse overrides to only a subset, runs empty-world ticks and performs repeated cross-domain transfers. It asserts that empty domains allocate no spatial cells and that only overridden domains allocate `NavigationInstance` state.
 
 ### Standard scalability benchmark
 
@@ -134,9 +195,9 @@ Movement emits deterministic lifecycle events for journey start, reroute, cancel
 
 ## Save / load
 
-`serializeWorldCore(world, navigation)` returns a JSON-safe versioned snapshot. `deserializeWorldCore(snapshot)` restores a fresh `World` and `Navigation` pair.
+`serializeWorldCore(world, navigation)` returns a JSON-safe versioned snapshot. `deserializeWorldCore(snapshot)` restores a fresh `World` plus either its `Navigation` or shared `NavigationRegistry`, matching the serialized root.
 
-Snapshots preserve dynamic road state and versions, world time, entities, body state, mobility, active journeys, shared journey routes, movement LOD configuration and interval accumulators. Route caches and pending movement events are intentionally transient and are not restored.
+Snapshots preserve dynamic road state and versions, world time, spatial domains, domain-scoped obstacles, entities, body state, mobility, active journeys, shared journey routes, shared navigation topology registries, bindings and sparse per-domain road effects. Route caches and pending movement events are intentionally transient and are not restored.
 
 
 ## Steering stress and stability
@@ -276,7 +337,7 @@ npm run example:mini-city
 It builds a small street graph, enables crowd steering, adds a market obstacle, applies and clears a temporary road closure, serializes/restores mid-simulation and drains movement events. The matching integration test imports only from `"world-core"`, so internal implementation imports cannot hide gaps in the published API.
 
 
-## Hierarchical routing and simulation regions
+## Hierarchical routing
 
 Navigation regions partition large graphs without replacing the exact node/road model. Cross-region roads automatically define gateway nodes.
 
@@ -307,34 +368,10 @@ const route = navigation.findHierarchicalRoute(
 
 `findHierarchicalRoute()` builds an overlay from regional gateway nodes. Travel inside each region is refined with an exact region-constrained A* route, while cross-region roads connect the overlay. The resulting route is still a normal `Route` and can be consumed by the existing movement system. Regional and final hierarchical routes have independent bounded caches and are invalidated on graph, road-effect, or region-membership changes.
 
-World simulation regions are spatial AABBs used for simulation detail policy rather than pathfinding:
+### Simulation policy is external
 
-```js
-const world = new World({
-  simulationRegions: [
-    {
-      id: "player-city",
-      minX: 0,
-      minY: 0,
-      maxX: 2000,
-      maxY: 2000,
-      priority: 10,
-      detailLevel: "full",
-      movementInterval: 0
-    },
-    {
-      id: "distant-city",
-      minX: 10000,
-      minY: 0,
-      maxX: 12000,
-      maxY: 2000,
-      detailLevel: "background",
-      movementInterval: 30
-    }
-  ]
-});
-```
+`world-core` does not reduce movement fidelity because something is far from a player, camera, or arbitrary interest point. Active movers advance with the simulation's actual `deltaSeconds` wherever they are.
 
-Overlapping simulation regions resolve deterministically by higher priority, then smaller area, then region ID. A region's `movementInterval` feeds directly into the existing movement scheduler; `null` falls back to distance LOD and `0` means full-rate movement. Consumers can query `simulationRegionAt(position)` or `getEntitySimulationRegion(id)` for their own AI/economy detail policies.
+If a consumer wants coarse AI, economy, or background processing, that scheduling policy belongs outside `world-core`. This keeps spatial truth and movement deterministic and avoids assuming that any player or privileged viewpoint exists.
 
-Navigation regions and world simulation regions are intentionally separate layers. A consumer may use the same IDs for both, but the core does not force graph partitions to match spatial simulation policy. Both are persisted in the current internal snapshot format. Until world-core has real savegame consumers, that format remains v1 and may evolve without compatibility guarantees.
+Until world-core has real savegame consumers, the internal snapshot format remains v1 and may evolve without compatibility guarantees.

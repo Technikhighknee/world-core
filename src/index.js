@@ -1,5 +1,12 @@
-export { World } from "./world/world.js";
+export {
+    World,
+    DEFAULT_WORLD_DOMAIN_ID,
+} from "./world/world.js";
 export { Navigation } from "./world/navigation.js";
+export {
+    NavigationRegistry,
+    NavigationInstance,
+} from "./world/navigation-registry.js";
 
 export {
     startJourney,

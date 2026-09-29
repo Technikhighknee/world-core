@@ -322,6 +322,11 @@ export function createLocalSteeringContext(
                     y: fromY,
                 },
                 config.obstacleLookahead,
+                undefined,
+                {
+                    domainId:
+                        entity.domainId,
+                },
             );
 
         for (const obstacle of obstacles) {
