@@ -363,6 +363,20 @@ export class NavigationInstance {
             );
     }
 
+    roadTravelSeconds(
+        roadOrId,
+        mobility,
+        distanceOverride = null,
+    ) {
+        return this.topology
+            .roadTravelSeconds(
+                roadOrId,
+                mobility,
+                this.runtimePolicy,
+                distanceOverride,
+            );
+    }
+
     canTraverseRoad(
         roadOrId,
         mobility,
