@@ -1545,6 +1545,12 @@ export function validateWorldCoreSnapshot(
             },
         );
 
+    const nodeKey =
+        id =>
+            typeof id +
+            ":" +
+            String(id);
+
     const entityByKey =
         new Map(
             entities.map(
@@ -1659,6 +1665,68 @@ export function validateWorldCoreSnapshot(
                 );
             }
 
+            const route =
+                routeById.get(
+                    journey.routeId,
+                );
+            const routeContext =
+                routeContextById.get(
+                    journey.routeId,
+                );
+
+            if (
+                !route ||
+                !routeContext
+            ) {
+                fail(
+                    `${path}.journey.routeId`,
+                    "references invalid route context",
+                );
+            }
+
+            if (navigationRegistry) {
+                const domainId =
+                    entity.domainId ??
+                    DEFAULT_WORLD_DOMAIN_ID;
+                const explicitBinding =
+                    navigationRegistry
+                        .domainBindings.find(
+                            binding =>
+                                binding.domainId ===
+                                domainId,
+                        );
+                const expectedTopologyId =
+                    explicitBinding
+                        ?.topologyId ??
+                    navigationRegistry
+                        .defaultTopologyId;
+
+                if (
+                    expectedTopologyId == null
+                ) {
+                    fail(
+                        `${path}.journey`,
+                        "entity domain has no navigation topology",
+                    );
+                }
+
+                if (
+                    route.topologyId !==
+                    expectedTopologyId
+                ) {
+                    fail(
+                        `${path}.journey.routeId`,
+                        "route topology does not match entity domain binding",
+                    );
+                }
+            }
+
+            const {
+                nodeIds,
+                roadIds,
+                roadByKey,
+            } = routeContext;
+
             if (
                 !nodeIds.has(
                     nodeKey(
@@ -1671,11 +1739,6 @@ export function validateWorldCoreSnapshot(
                     "references missing node",
                 );
             }
-
-            const route =
-                routeById.get(
-                    journey.routeId,
-                );
 
             if (
                 nodeKey(
