@@ -3,6 +3,9 @@ export {
     DEFAULT_WORLD_DOMAIN_ID,
 } from "./world/world.js";
 export { Navigation } from "./world/navigation.js";
+export {
+    NavigationRegistry,
+} from "./world/navigation-registry.js";
 
 export {
     startJourney,
