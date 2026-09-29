@@ -3,6 +3,7 @@ import {
 } from "./mobility-profiles.js";
 import { Navigation } from "./navigation.js";
 import {
+    NavigationInstance,
     NavigationRegistry,
     navigationForEntity,
 } from "./navigation-registry.js";
@@ -223,6 +224,15 @@ function deserializeNavigation(data) {
 function serializeNavigationSource(
     navigation,
 ) {
+    if (
+        navigation instanceof
+        NavigationInstance
+    ) {
+        throw new Error(
+            "A standalone NavigationInstance cannot be serialized as a world navigation root; serialize its NavigationRegistry instead",
+        );
+    }
+
     if (
         navigation instanceof
         NavigationRegistry
