@@ -157,3 +157,44 @@ test("subscriber removal during delivery prevents later invocation in the same e
 
     assert.deepEqual(seen, ["first"]);
 });
+
+
+test("live observers cannot mutate shared event envelopes", () => {
+    const world = new World({
+        captureEvents: true,
+    });
+    const seen = [];
+
+    world.subscribeEvents(event => {
+        assert.throws(
+            () => {
+                event.type = "corrupted";
+            },
+            TypeError,
+        );
+        seen.push(event.type);
+    });
+
+    world.subscribeEvents(event => {
+        seen.push(event.type);
+    });
+
+    world.emitEvent("stable-event", {
+        value: 17,
+    });
+
+    assert.deepEqual(seen, [
+        "stable-event",
+        "stable-event",
+    ]);
+    assert.deepEqual(
+        world.peekEvents().map(event => ({
+            type: event.type,
+            value: event.value,
+        })),
+        [{
+            type: "stable-event",
+            value: 17,
+        }],
+    );
+});
