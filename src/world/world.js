@@ -476,17 +476,19 @@ export class World {
             throw new Error(`Unknown entity: ${entityId}`);
         }
 
-        this.setEntityPositionXY(entity, x, y);
-
-        if (
-            this.movingEntities.has(entityId) &&
-            this.hasDynamicMovementLod()
-        ) {
-            this.refreshEntityMovementLod(entityId);
-        }
+        this.setEntityPositionXY(
+            entity,
+            x,
+            y,
+        );
     }
 
-    setEntityPositionXY(entity, x, y) {
+    setEntityPositionXY(
+        entity,
+        x,
+        y,
+        refreshMovementLod = true,
+    ) {
         entity.position.x = x;
         entity.position.y = y;
 
@@ -494,6 +496,18 @@ export class World {
             entity.id,
             entity.position,
         );
+
+        if (
+            refreshMovementLod &&
+            this.movingEntities.has(
+                entity.id,
+            ) &&
+            this.hasDynamicMovementLod()
+        ) {
+            this.refreshEntityMovementLod(
+                entity.id,
+            );
+        }
     }
 
     setEntityRadius(entityId, radius) {
