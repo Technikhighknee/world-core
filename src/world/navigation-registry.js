@@ -391,6 +391,46 @@ export class NavigationInstance {
             );
     }
 
+    findRouteFromPositionToAny(
+        position,
+        destinationNodeIds,
+        mobility,
+        options = {},
+    ) {
+        const planned =
+            this.topology
+                .findRouteFromPositionToAny(
+                    position,
+                    destinationNodeIds,
+                    mobility,
+                    options,
+                    this.runtimePolicy,
+                );
+
+        if (planned?.route) {
+            this.#rememberRoute(
+                planned.route,
+            );
+        }
+
+        return planned;
+    }
+
+    findRouteToAny(
+        startNodeId,
+        destinationNodeIds,
+        mobility,
+    ) {
+        return this.#rememberRoute(
+            this.topology.findRouteToAny(
+                startNodeId,
+                destinationNodeIds,
+                mobility,
+                this.runtimePolicy,
+            ),
+        );
+    }
+
     findRouteFromPosition(
         position,
         destinationNodeId,
