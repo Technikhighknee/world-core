@@ -1265,6 +1265,7 @@ export class Navigation {
 
     roadCostMultiplier(
         roadOrId,
+        runtime = null,
     ) {
         const road =
             typeof roadOrId === "string"
@@ -1275,46 +1276,88 @@ export class Navigation {
 
         if (!road) return Infinity;
 
+        let multiplier = 1;
         const effects =
             this.roadEffects.get(
                 road.id,
             );
 
-        if (!effects) return 1;
+        if (effects) {
+            for (
+                const effect of
+                effects.values()
+            ) {
+                if (effect.blocked) {
+                    return Infinity;
+                }
 
-        let multiplier = 1;
+                multiplier *=
+                    effect.costMultiplier;
+            }
+        }
 
-        for (const effect of effects.values()) {
-            if (effect.blocked) {
+        if (runtime) {
+            const runtimeMultiplier =
+                runtime.roadCostMultiplier(
+                    road,
+                );
+
+            if (
+                !Number.isFinite(
+                    runtimeMultiplier,
+                )
+            ) {
                 return Infinity;
             }
 
             multiplier *=
-                effect.costMultiplier;
+                runtimeMultiplier;
         }
 
         return multiplier;
     }
 
-    canTraverseRoad(roadOrId, mobility) {
+    canTraverseRoad(
+        roadOrId,
+        mobility,
+        runtime = null,
+    ) {
         const road =
             typeof roadOrId === "string"
                 ? this.roads.get(roadOrId)
                 : roadOrId;
 
-        if (!road || !road.enabled) return false;
+        if (!road || !road.enabled) {
+            return false;
+        }
+
         if (
             !Number.isFinite(
                 this.roadCostMultiplier(
                     road,
+                    runtime,
                 ),
             )
         ) {
             return false;
         }
-        if (!(mobility?.speed > 0)) return false;
-        if (!profileAllowed(road, mobility)) return false;
-        if (!tagsAllowed(road, mobility)) return false;
+
+        if (!(mobility?.speed > 0)) {
+            return false;
+        }
+
+        if (
+            !profileAllowed(
+                road,
+                mobility,
+            ) ||
+            !tagsAllowed(
+                road,
+                mobility,
+            )
+        ) {
+            return false;
+        }
 
         if (
             (mobility.requiredRoadWidth ?? 0) >
@@ -1323,16 +1366,33 @@ export class Navigation {
             return false;
         }
 
-        return roadSurfaceSpeed(road, mobility) > 0;
+        return (
+            roadSurfaceSpeed(
+                road,
+                mobility,
+            ) > 0
+        );
     }
 
-    isRouteLegCurrent(leg, mobility) {
-        const road = this.roads.get(leg.roadId);
+    isRouteLegCurrent(
+        leg,
+        mobility,
+        runtime = null,
+    ) {
+        const road =
+            this.roads.get(
+                leg.roadId,
+            );
 
         return Boolean(
             road &&
-            road.version === leg.roadVersion &&
-            this.canTraverseRoad(road, mobility),
+            road.version ===
+                leg.roadVersion &&
+            this.canTraverseRoad(
+                road,
+                mobility,
+                runtime,
+            ),
         );
     }
 
@@ -1340,6 +1400,7 @@ export class Navigation {
         route,
         mobility,
         startLegIndex = 0,
+        runtime = null,
     ) {
         for (
             let i = startLegIndex;
@@ -1350,6 +1411,7 @@ export class Navigation {
                 !this.isRouteLegCurrent(
                     route.legs[i],
                     mobility,
+                    runtime,
                 )
             ) {
                 return false;
@@ -1547,6 +1609,7 @@ export class Navigation {
             maxDistance = 0,
             maxEntries = 16,
         } = {},
+        runtime = null,
     ) {
         if (!(maxDistance >= 0)) {
             throw new Error(
@@ -1601,6 +1664,7 @@ export class Navigation {
                 !this.canTraverseRoad(
                     road,
                     mobility,
+                    runtime,
                 )
             ) {
                 continue;
@@ -1649,10 +1713,17 @@ export class Navigation {
         hit,
         destinationNodeId,
         mobility,
+        runtime = null,
     ) {
         const road = hit.road;
 
-        if (!this.canTraverseRoad(road, mobility)) {
+        if (
+            !this.canTraverseRoad(
+                road,
+                mobility,
+                runtime,
+            )
+        ) {
             return null;
         }
 
@@ -1676,6 +1747,7 @@ export class Navigation {
                 endpointNodeId,
                 destinationNodeId,
                 mobility,
+                runtime,
             );
 
             if (!baseRoute) return;
@@ -1685,6 +1757,7 @@ export class Navigation {
                 speed *
                 this.roadCostMultiplier(
                     road,
+                    runtime,
                 );
 
             const totalSeconds =
@@ -1753,6 +1826,7 @@ export class Navigation {
             entryMaxDistance = 0,
             maxEntryCandidates = 16,
         } = {},
+        runtime = null,
     ) {
         const node = this.nodeAt(
             position,
@@ -1764,6 +1838,7 @@ export class Navigation {
                 node.id,
                 destinationNodeId,
                 mobility,
+                runtime,
             );
 
             if (route) {
@@ -1788,6 +1863,7 @@ export class Navigation {
             this.canTraverseRoad(
                 hit.road,
                 mobility,
+                runtime,
             )
         ) {
             const planned =
@@ -1796,6 +1872,7 @@ export class Navigation {
                     hit,
                     destinationNodeId,
                     mobility,
+                    runtime,
                 );
 
             if (planned) return planned;
@@ -1815,6 +1892,7 @@ export class Navigation {
                     maxEntries:
                         maxEntryCandidates,
                 },
+                runtime,
             );
 
         let best = null;
@@ -1827,6 +1905,7 @@ export class Navigation {
                     entry.node.id,
                     destinationNodeId,
                     mobility,
+                    runtime,
                 );
 
                 if (!route) continue;
@@ -1852,6 +1931,7 @@ export class Navigation {
                         entry,
                         destinationNodeId,
                         mobility,
+                        runtime,
                     );
             }
 
@@ -2533,6 +2613,7 @@ export class Navigation {
         destinationNodeId,
         mobility,
         regionId,
+        runtime = null,
     ) {
         const start =
             this.nodes.get(startNodeId);
@@ -2564,7 +2645,11 @@ export class Navigation {
             `${regionId}|${startNodeId}|${destinationNodeId}|${mobilityCacheKey(mobility)}`;
 
         const cached =
-            this.regionalRouteCache.get(key);
+            runtime
+                ? null
+                : this.regionalRouteCache.get(
+                    key,
+                );
 
         if (cached) {
             this.regionalRouteCache.delete(key);
@@ -2660,6 +2745,7 @@ export class Navigation {
                     !this.canTraverseRoad(
                         road,
                         mobility,
+                        runtime,
                     )
                 ) {
                     continue;
@@ -2695,6 +2781,7 @@ export class Navigation {
                         speed *
                         this.roadCostMultiplier(
                             road,
+                            runtime,
                         );
 
                 const knownCost =
@@ -2808,6 +2895,10 @@ export class Navigation {
                 ),
         };
 
+        if (runtime) {
+            return route;
+        }
+
         return this.#setBoundedCache(
             this.regionalRouteCache,
             key,
@@ -2820,6 +2911,7 @@ export class Navigation {
         startNodeId,
         destinationNodeId,
         mobility,
+        runtime = null,
     ) {
         const start =
             this.nodes.get(startNodeId);
@@ -2850,6 +2942,7 @@ export class Navigation {
                 startNodeId,
                 destinationNodeId,
                 mobility,
+                runtime,
             );
         }
 
@@ -2865,8 +2958,10 @@ export class Navigation {
         const cacheKey =
             `${startNodeId}|${destinationNodeId}|${mobilityCacheKey(mobility)}`;
         const cached =
-            this.hierarchicalRouteCache
-                .get(cacheKey);
+            runtime
+                ? null
+                : this.hierarchicalRouteCache
+                    .get(cacheKey);
 
         if (cached) {
             this.hierarchicalRouteCache
@@ -2977,6 +3072,7 @@ export class Navigation {
                         targetId,
                         mobility,
                         currentNode.regionId,
+                        runtime,
                     );
 
                 if (!localRoute) {
@@ -3059,6 +3155,7 @@ export class Navigation {
                     !this.canTraverseRoad(
                         road,
                         mobility,
+                        runtime,
                     )
                 ) {
                     continue;
@@ -3074,6 +3171,7 @@ export class Navigation {
                     speed *
                     this.roadCostMultiplier(
                         road,
+                        runtime,
                     );
                 const nextCost =
                     currentCost +
@@ -3186,6 +3284,10 @@ export class Navigation {
                 ),
         };
 
+        if (runtime) {
+            return route;
+        }
+
         return this.#setBoundedCache(
             this.hierarchicalRouteCache,
             cacheKey,
@@ -3198,6 +3300,7 @@ export class Navigation {
         startNodeId,
         destinationNodeId,
         mobility,
+        runtime = null,
     ) {
         const start =
             this.nodes.get(startNodeId);
@@ -3240,7 +3343,11 @@ export class Navigation {
             mobilityCacheKey(mobility);
 
         const cached =
-            this.routeCache.get(cacheKey);
+            runtime
+                ? null
+                : this.routeCache.get(
+                    cacheKey,
+                );
 
         if (cached) {
             this.routeCache.delete(cacheKey);
@@ -3309,6 +3416,7 @@ export class Navigation {
                     !this.canTraverseRoad(
                         road,
                         mobility,
+                        runtime,
                     )
                 ) {
                     continue;
@@ -3326,6 +3434,7 @@ export class Navigation {
                         speed *
                         this.roadCostMultiplier(
                             road,
+                            runtime,
                         );
 
                 const knownCost =
@@ -3416,11 +3525,13 @@ export class Navigation {
                 costs.get(destinationNodeId),
         };
 
-        this.#cacheRoute(
-            cacheKey,
-            route,
-            start.componentId,
-        );
+        if (!runtime) {
+            this.#cacheRoute(
+                cacheKey,
+                route,
+                start.componentId,
+            );
+        }
 
         return route;
     }
