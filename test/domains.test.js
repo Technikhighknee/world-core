@@ -1076,6 +1076,9 @@ test("entity can walk across outdoor interior and cellar domains through explici
         "outdoors",
         outside,
     );
+    registry.setDefaultTopology(
+        "outdoors",
+    );
     registry.registerTopology(
         "tavern-ground-layout",
         ground,
@@ -1233,4 +1236,28 @@ test("entity can walk across outdoor interior and cellar domains through explici
 
     world.assertInternalConsistency();
     registry.assertInternalConsistency();
+});
+
+
+test("unbound domains do not silently inherit the first registered topology", () => {
+    const registry =
+        new NavigationRegistry();
+    const navigation =
+        new Navigation();
+
+    registry.registerTopology(
+        "some-layout",
+        navigation,
+    );
+
+    assert.equal(
+        registry.navigationForDomain(
+            "unbound-domain",
+        ),
+        null,
+    );
+    assert.equal(
+        registry.defaultTopologyId,
+        null,
+    );
 });
