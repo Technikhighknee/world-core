@@ -16,6 +16,14 @@ const transferCount =
         process.env.DOMAIN_BENCH_TRANSFERS ??
         100_000,
     );
+const overrideCount =
+    Math.min(
+        domainCount,
+        Number(
+            process.env.DOMAIN_BENCH_OVERRIDES ??
+            1_000,
+        ),
+    );
 
 function forceGc() {
     if (global.gc) global.gc();
@@ -106,6 +114,32 @@ forceGc();
 const afterBindings =
     process.memoryUsage();
 
+const overrideStarted =
+    performance.now();
+
+for (
+    let index = 0;
+    index < overrideCount;
+    index++
+) {
+    registry.setDomainRoadEffect(
+        `interior-${index}`,
+        "domain-bench",
+        "hall",
+        {
+            costMultiplier: 2,
+        },
+    );
+}
+
+const overrideMs =
+    performance.now() -
+    overrideStarted;
+
+forceGc();
+const afterOverrides =
+    process.memoryUsage();
+
 world.addEntity({
     id: "transfer-probe",
     position: {
@@ -176,12 +210,31 @@ if (
     );
 }
 
+if (
+    navigationDiagnostics
+        .overriddenDomainCount !==
+        overrideCount ||
+    navigationDiagnostics
+        .overrideRoadCount !==
+        overrideCount ||
+    navigationDiagnostics
+        .overrideEffectCount !==
+        overrideCount
+) {
+    throw new Error(
+        "Domain benchmark detected non-sparse navigation instance allocation",
+    );
+}
+
 console.log("=== domain workload ===");
 console.log(
     `domains: ${domainCount.toLocaleString()}`,
 );
 console.log(
     `shared navigation topologies: ${navigationDiagnostics.topologyCount}`,
+);
+console.log(
+    `domains with navigation overrides: ${navigationDiagnostics.overriddenDomainCount.toLocaleString()}`,
 );
 console.log(
     `spatial cells after creation: ${diagnostics.spatialCellCount}`,
@@ -198,6 +251,9 @@ console.log(
     `navigation bindings: ${bindingMs.toFixed(2)} ms`,
 );
 console.log(
+    `${overrideCount.toLocaleString()} sparse navigation overrides: ${overrideMs.toFixed(2)} ms`,
+);
+console.log(
     `${transferCount.toLocaleString()} transfers: ${transferMs.toFixed(2)} ms`,
 );
 
@@ -212,6 +268,9 @@ console.log(
     `after bindings: ${mib(afterBindings.heapUsed)} MiB`,
 );
 console.log(
+    `after sparse overrides: ${mib(afterOverrides.heapUsed)} MiB`,
+);
+console.log(
     `after transfers: ${mib(afterTransfers.heapUsed)} MiB`,
 );
 console.log(
@@ -219,4 +278,7 @@ console.log(
 );
 console.log(
     `binding delta: ${mib(afterBindings.heapUsed - afterDomains.heapUsed)} MiB`,
+);
+console.log(
+    `override delta: ${mib(afterOverrides.heapUsed - afterBindings.heapUsed)} MiB`,
 );
