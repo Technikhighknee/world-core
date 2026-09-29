@@ -8,6 +8,7 @@ A rendering-independent 2D world, navigation and movement simulation core.
 import {
   World,
   Navigation,
+  NavigationRegistry,
   mobilityProfile,
   startJourney,
   rerouteJourney,
@@ -44,6 +45,51 @@ The world stores actual entity coordinates. Navigation is a separate graph used 
 - Journeys can start and re-route while an entity is already in the middle of a road.
 - `nearestNode()` consistently returns a node; `nearestNodeWithDistance()` returns node plus distance.
 
+## Spatial domains and shared interior topology
+
+A single `World` can contain many isolated local 2D coordinate spaces. Domains are addresses inside one simulation, not separate `World` instances.
+
+```js
+const world = new World();
+
+world.addDomain({ id: "tavern-17-ground" });
+world.addDomain({ id: "tavern-17-cellar" });
+
+world.addEntity({
+  id: "hans",
+  domainId: "tavern-17-ground",
+  position: { x: 2, y: 4 },
+  mobility: mobilityProfile("pedestrian")
+});
+```
+
+Normal spatial queries never cross domain boundaries. Identical local coordinates in two interiors are unrelated spatial locations. Empty domains allocate no spatial cells, and movement iterates active movers rather than all registered domains.
+
+`transferEntity()` atomically changes an entity's domain and local position. Any active journey is cancelled because a route belongs to one navigation topology.
+
+```js
+world.transferEntity("hans", {
+  domainId: "tavern-17-cellar",
+  position: { x: 1, y: 3 }
+});
+```
+
+Many domains can share one navigation graph through `NavigationRegistry`. This is intended for repeated interior layouts: 50,000 house instances can bind to one stored graph rather than cloning nodes, roads, static indexes and route caches 50,000 times.
+
+```js
+const houseLayout = new Navigation();
+// define the shared layout once
+
+const navigation = new NavigationRegistry();
+navigation.registerTopology("small-house", houseLayout);
+navigation.bindDomain("house-1", "small-house");
+navigation.bindDomain("house-2", "small-house");
+```
+
+A registered topology is shared state: mutating that `Navigation` changes it for every bound domain. Per-instance navigation overrides are intentionally not synthesized by cloning the topology. Dynamic obstacles are domain-scoped and allocated lazily; static repeated geometry belongs in shared topology data.
+
+Snapshots remain format version 1. Registry snapshots store each shared navigation topology once, persist domain-to-topology bindings, and tag active journey routes with their topology identity.
+
 ## Benchmarking
 
 ```bash
@@ -51,6 +97,7 @@ npm run bench
 npm run bench:churn
 npm run bench:soak
 npm run bench:retention
+npm run bench:domains
 ```
 
 All benchmarks run with `--expose-gc`. This is intentional: the reports distinguish memory that is merely waiting for garbage collection from memory that remains reachable after forced full collections.
@@ -136,7 +183,7 @@ Movement emits deterministic lifecycle events for journey start, reroute, cancel
 
 `serializeWorldCore(world, navigation)` returns a JSON-safe versioned snapshot. `deserializeWorldCore(snapshot)` restores a fresh `World` and `Navigation` pair.
 
-Snapshots preserve dynamic road state and versions, world time, entities, body state, mobility, active journeys, shared journey routes, movement LOD configuration and interval accumulators. Route caches and pending movement events are intentionally transient and are not restored.
+Snapshots preserve dynamic road state and versions, world time, spatial domains, domain-scoped obstacles, entities, body state, mobility, active journeys, shared journey routes, shared navigation topology registries and interval accumulators. Route caches and pending movement events are intentionally transient and are not restored.
 
 
 ## Steering stress and stability
