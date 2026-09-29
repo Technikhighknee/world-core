@@ -927,6 +927,120 @@ export function validateWorldCoreSnapshot(
                 );
             }
         }
+
+        const domainRoadEffects =
+            requireArray(
+                navigationRegistry
+                    .domainRoadEffects ?? [],
+                "$.navigation.domainRoadEffects",
+            );
+        const seenDomainRoadEffects =
+            new Set();
+
+        for (
+            let index = 0;
+            index <
+                domainRoadEffects.length;
+            index++
+        ) {
+            const effect =
+                requireObject(
+                    domainRoadEffects[index],
+                    `$.navigation.domainRoadEffects[${index}]`,
+                );
+            const effectPath =
+                `$.navigation.domainRoadEffects[${index}]`;
+
+            if (
+                typeof effect.domainId !==
+                    "string" ||
+                effect.domainId.length === 0
+            ) {
+                fail(
+                    `${effectPath}.domainId`,
+                    "expected non-empty string",
+                );
+            }
+
+            const topologyId =
+                navigationBindingByDomain.get(
+                    effect.domainId,
+                );
+
+            if (topologyId == null) {
+                fail(
+                    `${effectPath}.domainId`,
+                    "requires explicit navigation domain binding",
+                );
+            }
+
+            const context =
+                navigationContexts.get(
+                    topologyId,
+                );
+
+            if (
+                typeof effect.roadId !==
+                    "string" ||
+                !context?.roadIds.has(
+                    context.nodeKey(
+                        effect.roadId,
+                    ),
+                )
+            ) {
+                fail(
+                    `${effectPath}.roadId`,
+                    "references missing road in bound navigation topology",
+                );
+            }
+
+            if (
+                typeof effect.effectId !==
+                    "string" ||
+                effect.effectId.length === 0
+            ) {
+                fail(
+                    `${effectPath}.effectId`,
+                    "expected non-empty string",
+                );
+            }
+
+            requireBoolean(
+                effect.blocked,
+                `${effectPath}.blocked`,
+            );
+            requireFinite(
+                effect.costMultiplier,
+                `${effectPath}.costMultiplier`,
+            );
+
+            if (
+                effect.costMultiplier < 1
+            ) {
+                fail(
+                    `${effectPath}.costMultiplier`,
+                    "expected number >= 1",
+                );
+            }
+
+            const key =
+                `${effect.domainId}\u0000${effect.roadId}\u0000${effect.effectId}`;
+
+            if (
+                seenDomainRoadEffects.has(
+                    key,
+                )
+            ) {
+                fail(
+                    effectPath,
+                    "duplicate domain road effect",
+                );
+            }
+
+            seenDomainRoadEffects.add(
+                key,
+            );
+        }
     } else {
         defaultNavigationContext =
             validateNavigationTopology(
@@ -1024,6 +1138,31 @@ export function validateWorldCoreSnapshot(
             ) {
                 fail(
                     `$.navigation.domainBindings[${index}].domainId`,
+                    "references missing world domain",
+                );
+            }
+        }
+    }
+
+    if (navigationRegistry) {
+        const effects =
+            navigationRegistry
+                .domainRoadEffects ?? [];
+
+        for (
+            let index = 0;
+            index < effects.length;
+            index++
+        ) {
+            if (
+                !domainIds.has(
+                    "string:" +
+                        effects[index]
+                            .domainId,
+                )
+            ) {
+                fail(
+                    `$.navigation.domainRoadEffects[${index}].domainId`,
                     "references missing world domain",
                 );
             }
