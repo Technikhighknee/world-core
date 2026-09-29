@@ -3,8 +3,10 @@ import {
     distanceSquaredPointToSegment,
 } from "./geometry.js";
 import { distanceSquared } from "./vec2.js";
-import { SpatialHash } from "./spatial-hash.js";
+import { DomainSpatialIndex } from "./domain-spatial-index.js";
 import { ObstacleField } from "./obstacle-field.js";
+
+export const DEFAULT_WORLD_DOMAIN_ID = "default";
 
 export class World {
     constructor({
@@ -13,6 +15,7 @@ export class World {
         movementLodTiers = null,
         interestPoints = [],
         simulationRegions = [],
+        domains = [],
         localSteering = null,
         captureEvents = false,
         eventQueueLimit = 10000,
@@ -20,6 +23,23 @@ export class World {
     } = {}) {
         this.time = 0;
         this.entities = new Map();
+
+        this.domains = new Map();
+        this.nextDomainHandle = 0;
+        this.addDomain({
+            id: DEFAULT_WORLD_DOMAIN_ID,
+        });
+
+        for (const domain of domains) {
+            if (
+                domain?.id ===
+                DEFAULT_WORLD_DOMAIN_ID
+            ) {
+                continue;
+            }
+
+            this.addDomain(domain);
+        }
 
         this.captureEvents = Boolean(captureEvents);
         this.events = [];
@@ -33,7 +53,7 @@ export class World {
                 eventOverflowPolicy,
         });
 
-        this.spatial = new SpatialHash(spatialCellSize);
+        this.spatial = new DomainSpatialIndex(spatialCellSize);
         this.obstacles =
             new ObstacleField(
                 obstacleCellSize,
@@ -124,6 +144,13 @@ export class World {
             return interval === 0 ? null : interval;
         }
 
+        if (
+            entity.domainId !==
+            DEFAULT_WORLD_DOMAIN_ID
+        ) {
+            return null;
+        }
+
         const simulationRegion =
             this.simulationRegionAt(
                 entity.position,
@@ -207,6 +234,120 @@ export class World {
 
         bucket.add(entity);
         this.entityMovementIntervals.set(entityId, interval);
+    }
+
+    #requireDomain(
+        domainId =
+            DEFAULT_WORLD_DOMAIN_ID,
+    ) {
+        const domain =
+            this.domains.get(domainId);
+
+        if (!domain) {
+            throw new Error(
+                `Unknown world domain: ${domainId}`,
+            );
+        }
+
+        return domain;
+    }
+
+    #queryDomain(
+        domainId,
+        excludeId,
+    ) {
+        if (domainId != null) {
+            return this.#requireDomain(
+                domainId,
+            );
+        }
+
+        if (excludeId != null) {
+            const entity =
+                this.entities.get(
+                    excludeId,
+                );
+
+            if (entity) {
+                return this.#requireDomain(
+                    entity.domainId,
+                );
+            }
+        }
+
+        return this.#requireDomain(
+            DEFAULT_WORLD_DOMAIN_ID,
+        );
+    }
+
+    addDomain({ id }) {
+        if (
+            typeof id !== "string" ||
+            id.length === 0
+        ) {
+            throw new Error(
+                "World domain id must be a non-empty string",
+            );
+        }
+
+        if (this.domains.has(id)) {
+            throw new Error(
+                `World domain already exists: ${id}`,
+            );
+        }
+
+        const domain = {
+            id,
+            handle:
+                this.nextDomainHandle++,
+            entityCount: 0,
+        };
+
+        this.domains.set(id, domain);
+        return domain;
+    }
+
+    removeDomain(domainId) {
+        if (
+            domainId ===
+            DEFAULT_WORLD_DOMAIN_ID
+        ) {
+            throw new Error(
+                "Cannot remove the default world domain",
+            );
+        }
+
+        const domain =
+            this.domains.get(domainId);
+
+        if (!domain) return false;
+
+        if (domain.entityCount > 0) {
+            throw new Error(
+                `Cannot remove non-empty world domain: ${domainId}`,
+            );
+        }
+
+        return this.domains.delete(
+            domainId,
+        );
+    }
+
+    getDomain(domainId) {
+        return this.domains.get(
+            domainId,
+        );
+    }
+
+    getEntityDomain(entityId) {
+        const entity =
+            this.entities.get(entityId);
+
+        if (!entity) return null;
+
+        return this.domains.get(
+            entity.domainId,
+        ) ?? null;
     }
 
     configureEventQueue({
@@ -402,8 +543,19 @@ export class World {
         {
             includeDisabled = false,
             predicate = null,
+            domainId =
+                DEFAULT_WORLD_DOMAIN_ID,
         } = {},
     ) {
+        if (
+            domainId !==
+            DEFAULT_WORLD_DOMAIN_ID
+        ) {
+            this.#requireDomain(domainId);
+            results.length = 0;
+            return results;
+        }
+
         return this.obstacles.queryRadiusInto(
             results,
             position,
@@ -437,11 +589,25 @@ export class World {
 
         stored.body ??= { radius: 0.35 };
 
+        const domain =
+            this.#requireDomain(
+                stored.domainId ??
+                    DEFAULT_WORLD_DOMAIN_ID,
+            );
+
+        stored.domainId = domain.id;
+
         const radius = stored.body.radius ?? 0;
         this.#trackRadius(radius);
 
         this.entities.set(stored.id, stored);
-        this.spatial.upsertPoint(stored.id, stored.position);
+        domain.entityCount++;
+
+        this.spatial.upsertPoint(
+            stored.id,
+            domain.handle,
+            stored.position,
+        );
 
         if (stored.journey) {
             this.markMoving(stored.id);
@@ -458,11 +624,140 @@ export class World {
         this.spatial.remove(entityId);
         this.#untrackRadius(entity.body?.radius ?? 0);
 
+        const domain =
+            this.#requireDomain(
+                entity.domainId,
+            );
+
+        domain.entityCount--;
+
         return this.entities.delete(entityId);
     }
 
     getEntity(entityId) {
         return this.entities.get(entityId);
+    }
+
+    transferEntity(
+        entityId,
+        {
+            domainId,
+            position,
+        },
+    ) {
+        const entity =
+            this.entities.get(entityId);
+
+        if (!entity) {
+            throw new Error(
+                `Unknown entity: ${entityId}`,
+            );
+        }
+
+        if (
+            !position ||
+            !Number.isFinite(position.x) ||
+            !Number.isFinite(position.y)
+        ) {
+            throw new Error(
+                "Domain transfer position must contain finite x/y coordinates",
+            );
+        }
+
+        const previousDomain =
+            this.#requireDomain(
+                entity.domainId,
+            );
+        const nextDomain =
+            this.#requireDomain(
+                domainId,
+            );
+
+        if (
+            previousDomain.handle ===
+            nextDomain.handle
+        ) {
+            this.setEntityPositionXY(
+                entity,
+                position.x,
+                position.y,
+            );
+
+            return entity;
+        }
+
+        const previousPosition = {
+            x: entity.position.x,
+            y: entity.position.y,
+        };
+
+        try {
+            entity.domainId =
+                nextDomain.id;
+            entity.position.x =
+                position.x;
+            entity.position.y =
+                position.y;
+
+            this.spatial.upsertPoint(
+                entity.id,
+                nextDomain.handle,
+                entity.position,
+            );
+
+            previousDomain.entityCount--;
+            nextDomain.entityCount++;
+        } catch (error) {
+            entity.domainId =
+                previousDomain.id;
+            entity.position.x =
+                previousPosition.x;
+            entity.position.y =
+                previousPosition.y;
+
+            this.spatial.upsertPoint(
+                entity.id,
+                previousDomain.handle,
+                entity.position,
+            );
+
+            throw error;
+        }
+
+        if (entity.journey) {
+            const destinationNodeId =
+                entity.journey
+                    .destinationNodeId;
+
+            entity.journey = null;
+            this.unmarkMoving(
+                entity.id,
+            );
+
+            this.emitEvent(
+                "journeyCancelled",
+                {
+                    entityId:
+                        entity.id,
+                    destinationNodeId,
+                    reason:
+                        "domain-transfer",
+                },
+            );
+        }
+
+        this.emitEvent(
+            "entityDomainTransferred",
+            {
+                entityId: entity.id,
+                fromDomainId:
+                    previousDomain.id,
+                toDomainId:
+                    nextDomain.id,
+            },
+        );
+
+        return entity;
     }
 
     setPosition(entityId, position) {
@@ -492,8 +787,14 @@ export class World {
         entity.position.x = x;
         entity.position.y = y;
 
+        const domain =
+            this.#requireDomain(
+                entity.domainId,
+            );
+
         this.spatial.upsertPoint(
             entity.id,
+            domain.handle,
             entity.position,
         );
 
@@ -1078,8 +1379,17 @@ export class World {
         position,
         radius,
         buffer,
-        { excludeId = null, predicate = null } = {},
+        {
+            excludeId = null,
+            predicate = null,
+            domainId = null,
+        } = {},
     ) {
+        const domain =
+            this.#queryDomain(
+                domainId,
+                excludeId,
+            );
         const candidates = buffer.candidates;
         const results = buffer.results;
 
@@ -1087,6 +1397,7 @@ export class World {
 
         this.spatial.queryRadiusInto(
             candidates,
+            domain.handle,
             position,
             radius + this.maxEntityRadius,
         );
@@ -1124,8 +1435,18 @@ export class World {
         maxX,
         maxY,
         buffer,
-        { excludeId = null, predicate = null } = {},
+        {
+            excludeId = null,
+            predicate = null,
+            domainId = null,
+        } = {},
     ) {
+        const domain =
+            this.#queryDomain(
+                domainId,
+                excludeId,
+            );
+
         if (minX > maxX || minY > maxY) {
             throw new Error("Invalid AABB bounds");
         }
@@ -1137,6 +1458,7 @@ export class World {
 
         this.spatial.queryBoundsInto(
             candidates,
+            domain.handle,
             minX - this.maxEntityRadius,
             minY - this.maxEntityRadius,
             maxX + this.maxEntityRadius,
@@ -1194,8 +1516,18 @@ export class World {
         b,
         radius,
         buffer,
-        { excludeId = null, predicate = null } = {},
+        {
+            excludeId = null,
+            predicate = null,
+            domainId = null,
+        } = {},
     ) {
+        const domain =
+            this.#queryDomain(
+                domainId,
+                excludeId,
+            );
+
         if (!(radius >= 0)) {
             throw new Error(
                 "Capsule radius must be greater than or equal to 0",
@@ -1210,6 +1542,7 @@ export class World {
 
         this.spatial.queryBoundsInto(
             candidates,
+            domain.handle,
             Math.min(a.x, b.x) - broadRadius,
             Math.min(a.y, b.y) - broadRadius,
             Math.max(a.x, b.x) + broadRadius,
@@ -1289,8 +1622,15 @@ export class World {
             maxDistance = Infinity,
             excludeId = null,
             predicate = null,
+            domainId = null,
         } = {},
     ) {
+        const domain =
+            this.#queryDomain(
+                domainId,
+                excludeId,
+            );
+
         if (!(maxDistance >= 0)) {
             throw new Error(
                 "maxDistance must be greater than or equal to 0",
@@ -1301,11 +1641,15 @@ export class World {
 
         if (Number.isFinite(maxDistance)) {
             candidates = this.spatial.queryRadius(
+                domain.handle,
                 position,
                 maxDistance + this.maxEntityRadius,
             );
         } else {
-            candidates = this.entities.keys();
+            candidates =
+                this.spatial.members(
+                    domain.handle,
+                );
         }
 
         let best = null;
@@ -1367,10 +1711,15 @@ export class World {
         return {
             entityCount: this.entities.size,
             spatialIndexedEntities: this.spatial.entityRanges.size,
-            spatialCellCount: this.spatial.cells.size,
+            spatialCellCount:
+                this.spatial.cellCount(),
             spatialMemberships: this.spatial.membershipCount(),
             spatialMultiOccupancyCells:
                 this.spatial.multiOccupancyCellCount(),
+            domainCount:
+                this.domains.size,
+            occupiedSpatialDomainCount:
+                this.spatial.occupiedDomainCount(),
             movingEntities: this.movingEntities.size,
             movementIntervalEntries: this.entityMovementIntervals.size,
             movementBucketCount: this.movementBuckets.size,
@@ -1401,6 +1750,72 @@ export class World {
 
     assertInternalConsistency() {
         const diagnostics = this.getDiagnostics();
+
+        this.spatial.assertInternalConsistency();
+
+        const defaultDomain =
+            this.domains.get(
+                DEFAULT_WORLD_DOMAIN_ID,
+            );
+
+        if (
+            !defaultDomain ||
+            defaultDomain.handle !== 0
+        ) {
+            throw new Error(
+                "Default world domain is missing or has an invalid handle",
+            );
+        }
+
+        let domainEntityCount = 0;
+
+        for (
+            const [domainId, domain] of
+            this.domains
+        ) {
+            if (
+                domain.id !== domainId ||
+                !Number.isInteger(
+                    domain.handle,
+                ) ||
+                domain.handle < 0 ||
+                !Number.isInteger(
+                    domain.entityCount,
+                ) ||
+                domain.entityCount < 0
+            ) {
+                throw new Error(
+                    `Invalid world domain state: ${domainId}`,
+                );
+            }
+
+            domainEntityCount +=
+                domain.entityCount;
+        }
+
+        if (
+            domainEntityCount !==
+            diagnostics.entityCount
+        ) {
+            throw new Error(
+                `World domain entity drift: ${domainEntityCount} assigned for ${diagnostics.entityCount} entities`,
+            );
+        }
+
+        for (
+            const entity of
+            this.entities.values()
+        ) {
+            if (
+                !this.domains.has(
+                    entity.domainId,
+                )
+            ) {
+                throw new Error(
+                    `Entity references unknown world domain: ${String(entity.id)} -> ${entity.domainId}`,
+                );
+            }
+        }
 
         if (
             diagnostics.spatialIndexedEntities !==
