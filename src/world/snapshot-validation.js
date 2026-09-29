@@ -500,20 +500,20 @@ function validateNavigationTopology(
     ) {
         const node =
             nodes[index];
-        const path =
-            `$.navigation.nodes[${index}]`;
+        const itemPath =
+            `${path}.nodes[${index}]`;
 
         requireFinite(
             node.x,
-            `${path}.x`,
+            `${itemPath}.x`,
         );
         requireFinite(
             node.y,
-            `${path}.y`,
+            `${itemPath}.y`,
         );
         requireNonNegative(
             node.junctionRadius ?? 0,
-            `${path}.junctionRadius`,
+            `${itemPath}.junctionRadius`,
         );
 
         if (
@@ -525,7 +525,7 @@ function validateNavigationTopology(
             )
         ) {
             fail(
-                `${path}.regionId`,
+                `${itemPath}.regionId`,
                 "references missing navigation region",
             );
         }
@@ -569,8 +569,8 @@ function validateNavigationTopology(
     ) {
         const road =
             roads[index];
-        const path =
-            `$.navigation.roads[${index}]`;
+        const itemPath =
+            `${path}.roads[${index}]`;
 
         if (
             !nodeIds.has(
@@ -578,7 +578,7 @@ function validateNavigationTopology(
             )
         ) {
             fail(
-                `${path}.from`,
+                `${itemPath}.from`,
                 "references missing node",
             );
         }
@@ -589,14 +589,14 @@ function validateNavigationTopology(
             )
         ) {
             fail(
-                `${path}.to`,
+                `${itemPath}.to`,
                 "references missing node",
             );
         }
 
         requirePositive(
             road.width,
-            `${path}.width`,
+            `${itemPath}.width`,
         );
 
         if (
@@ -604,40 +604,40 @@ function validateNavigationTopology(
             "string"
         ) {
             fail(
-                `${path}.surface`,
+                `${itemPath}.surface`,
                 "expected string",
             );
         }
 
         requireBoolean(
             road.bidirectional,
-            `${path}.bidirectional`,
+            `${itemPath}.bidirectional`,
         );
         requireBoolean(
             road.enabled,
-            `${path}.enabled`,
+            `${itemPath}.enabled`,
         );
 
         validateStringArray(
             road.allowedProfiles,
-            `${path}.allowedProfiles`,
+            `${itemPath}.allowedProfiles`,
             {
                 nullable: true,
             },
         );
         validateStringArray(
             road.blockedProfiles ?? [],
-            `${path}.blockedProfiles`,
+            `${itemPath}.blockedProfiles`,
         );
         validateStringArray(
             road.tags ?? [],
-            `${path}.tags`,
+            `${itemPath}.tags`,
         );
 
         const shape =
             requireArray(
                 road.shape,
-                `${path}.shape`,
+                `${itemPath}.shape`,
             );
 
         for (
@@ -654,19 +654,19 @@ function validateNavigationTopology(
 
         requireInteger(
             road.version,
-            `${path}.version`,
+            `${itemPath}.version`,
             1,
         );
 
         const effects =
             requireArray(
                 road.effects ?? [],
-                `${path}.effects`,
+                `${itemPath}.effects`,
             );
 
         requireUniqueIds(
             effects,
-            `${path}.effects`,
+            `${itemPath}.effects`,
             effect => {
                 requireObject(
                     effect,
@@ -770,6 +770,8 @@ export function validateWorldCoreSnapshot(
         );
 
     const navigationContexts =
+        new Map();
+    const navigationBindingByDomain =
         new Map();
     let navigationRegistry =
         null;
@@ -906,6 +908,10 @@ export function validateWorldCoreSnapshot(
 
             seenBindings.add(
                 binding.domainId,
+            );
+            navigationBindingByDomain.set(
+                binding.domainId,
+                binding.topologyId,
             );
 
             if (
@@ -1688,16 +1694,9 @@ export function validateWorldCoreSnapshot(
                 const domainId =
                     entity.domainId ??
                     DEFAULT_WORLD_DOMAIN_ID;
-                const explicitBinding =
-                    navigationRegistry
-                        .domainBindings.find(
-                            binding =>
-                                binding.domainId ===
-                                domainId,
-                        );
                 const expectedTopologyId =
-                    explicitBinding
-                        ?.topologyId ??
+                    navigationBindingByDomain
+                        .get(domainId) ??
                     navigationRegistry
                         .defaultTopologyId;
 
