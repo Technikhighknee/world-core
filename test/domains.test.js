@@ -1273,7 +1273,7 @@ test("failed domain transfer leaves entity and spatial state unchanged", async (
     const world =
         new World({
             captureEvents: true,
-            eventQueueLimit: 1,
+            eventQueueLimit: 2,
             eventOverflowPolicy:
                 "throw",
         });
@@ -1323,7 +1323,7 @@ test("failed domain transfer leaves entity and spatial state unchanged", async (
 
     assert.equal(
         world.peekEvents().length,
-        1,
+        2,
     );
 
     const before =
