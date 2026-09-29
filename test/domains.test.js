@@ -1983,3 +1983,51 @@ test("navigation instances stay sparse across many shared-topology domain bindin
         0,
     );
 });
+
+test("snapshot validation rejects domain road overrides against the wrong topology", () => {
+    const world = new World();
+    world.addDomain({
+        id: "house",
+    });
+
+    const topology =
+        buildSharedHouseTopology();
+    const registry =
+        new NavigationRegistry();
+
+    registry.registerTopology(
+        "layout",
+        topology,
+    );
+    registry.bindDomain(
+        "house",
+        "layout",
+    );
+    registry.setDomainRoadEffect(
+        "house",
+        "closed",
+        "entrance-hall",
+        {
+            blocked: true,
+        },
+    );
+
+    const snapshot =
+        serializeWorldCore(
+            world,
+            registry,
+        );
+
+    snapshot.navigation
+        .domainRoadEffects[0]
+        .roadId =
+        "missing-road";
+
+    assert.throws(
+        () =>
+            validateWorldCoreSnapshot(
+                snapshot,
+            ),
+        /missing road in bound navigation topology/,
+    );
+});
