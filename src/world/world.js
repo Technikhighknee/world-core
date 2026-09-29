@@ -58,6 +58,10 @@ export class World {
             new ObstacleField(
                 obstacleCellSize,
             );
+        this.domainObstacleFields =
+            new Map();
+        this.obstacleDomains =
+            new Map();
         this.obstacleQueryCandidates =
             new Set();
         this.obstacleQueryResults = [];
@@ -328,6 +332,25 @@ export class World {
             );
         }
 
+        const obstacleField =
+            this.domainObstacleFields.get(
+                domain.handle,
+            );
+
+        if (
+            obstacleField &&
+            obstacleField.obstacles.size >
+                0
+        ) {
+            throw new Error(
+                `Cannot remove world domain with obstacles: ${domainId}`,
+            );
+        }
+
+        this.domainObstacleFields.delete(
+            domain.handle,
+        );
+
         return this.domains.delete(
             domainId,
         );
@@ -503,36 +526,201 @@ export class World {
         return this.events;
     }
 
-    addObstacle(obstacle) {
-        return this.obstacles.add(
-            obstacle,
+    #obstacleFieldForDomain(
+        domainId,
+        create = false,
+    ) {
+        const domain =
+            this.#requireDomain(
+                domainId ??
+                    DEFAULT_WORLD_DOMAIN_ID,
+            );
+
+        if (
+            domain.id ===
+            DEFAULT_WORLD_DOMAIN_ID
+        ) {
+            return this.obstacles;
+        }
+
+        let field =
+            this.domainObstacleFields.get(
+                domain.handle,
+            );
+
+        if (!field && create) {
+            field =
+                new ObstacleField(
+                    this.obstacles.index
+                        .cellSize,
+                );
+
+            this.domainObstacleFields.set(
+                domain.handle,
+                field,
+            );
+        }
+
+        return field ?? null;
+    }
+
+    addObstacle(
+        obstacle,
+        {
+            domainId =
+                DEFAULT_WORLD_DOMAIN_ID,
+        } = {},
+    ) {
+        if (
+            this.obstacleDomains.has(
+                obstacle.id,
+            )
+        ) {
+            throw new Error(
+                `Obstacle already exists: ${obstacle.id}`,
+            );
+        }
+
+        const domain =
+            this.#requireDomain(
+                domainId,
+            );
+        const field =
+            this.#obstacleFieldForDomain(
+                domain.id,
+                true,
+            );
+        const stored =
+            field.add(obstacle);
+
+        this.obstacleDomains.set(
+            stored.id,
+            domain.id,
+        );
+
+        return stored;
+    }
+
+    getObstacle(obstacleId) {
+        const domainId =
+            this.obstacleDomains.get(
+                obstacleId,
+            );
+
+        if (domainId == null) {
+            return undefined;
+        }
+
+        return this
+            .#obstacleFieldForDomain(
+                domainId,
+            )
+            ?.obstacles.get(
+                obstacleId,
+            );
+    }
+
+    getObstacleDomain(
+        obstacleId,
+    ) {
+        return (
+            this.obstacleDomains.get(
+                obstacleId,
+            ) ?? null
         );
     }
 
     removeObstacle(obstacleId) {
-        return this.obstacles.remove(
+        const domainId =
+            this.obstacleDomains.get(
+                obstacleId,
+            );
+
+        if (domainId == null) {
+            return false;
+        }
+
+        const domain =
+            this.#requireDomain(
+                domainId,
+            );
+        const field =
+            this.#obstacleFieldForDomain(
+                domainId,
+            );
+
+        if (
+            !field ||
+            !field.remove(obstacleId)
+        ) {
+            return false;
+        }
+
+        this.obstacleDomains.delete(
             obstacleId,
         );
+
+        if (
+            domainId !==
+                DEFAULT_WORLD_DOMAIN_ID &&
+            field.obstacles.size === 0
+        ) {
+            this.domainObstacleFields.delete(
+                domain.handle,
+            );
+        }
+
+        return true;
     }
 
     setObstacleEnabled(
         obstacleId,
         enabled,
     ) {
-        return this.obstacles.setEnabled(
-            obstacleId,
-            enabled,
-        );
+        const domainId =
+            this.obstacleDomains.get(
+                obstacleId,
+            );
+
+        if (domainId == null) {
+            throw new Error(
+                `Unknown obstacle: ${obstacleId}`,
+            );
+        }
+
+        return this
+            .#obstacleFieldForDomain(
+                domainId,
+            )
+            .setEnabled(
+                obstacleId,
+                enabled,
+            );
     }
 
     replaceObstacle(
         obstacleId,
         patch,
     ) {
-        return this.obstacles.replace(
-            obstacleId,
-            patch,
-        );
+        const domainId =
+            this.obstacleDomains.get(
+                obstacleId,
+            );
+
+        if (domainId == null) {
+            throw new Error(
+                `Unknown obstacle: ${obstacleId}`,
+            );
+        }
+
+        return this
+            .#obstacleFieldForDomain(
+                domainId,
+            )
+            .replace(
+                obstacleId,
+                patch,
+            );
     }
 
     queryObstaclesRadiusInto(
@@ -547,16 +735,17 @@ export class World {
                 DEFAULT_WORLD_DOMAIN_ID,
         } = {},
     ) {
-        if (
-            domainId !==
-            DEFAULT_WORLD_DOMAIN_ID
-        ) {
-            this.#requireDomain(domainId);
+        const field =
+            this.#obstacleFieldForDomain(
+                domainId,
+            );
+
+        if (!field) {
             results.length = 0;
             return results;
         }
 
-        return this.obstacles.queryRadiusInto(
+        return field.queryRadiusInto(
             results,
             position,
             radius,
@@ -1728,9 +1917,24 @@ export class World {
             radiusCountEntries: this.radiusCounts.size,
             maxEntityRadius: this.maxEntityRadius,
             obstacleCount:
-                this.obstacles.obstacles.size,
+                this.obstacleDomains.size,
             obstacleIndexMemberships:
-                this.obstacles.index.membershipCount(),
+                this.obstacles.index.membershipCount() +
+                [...this.domainObstacleFields.values()]
+                    .reduce(
+                        (total, field) =>
+                            total +
+                            field.index.membershipCount(),
+                        0,
+                    ),
+            occupiedObstacleDomainCount:
+                this.domainObstacleFields.size +
+                (
+                    this.obstacles.obstacles.size >
+                        0
+                        ? 1
+                        : 0
+                ),
             eventQueueSize:
                 this.events.length,
             eventQueueLimit:
@@ -1984,6 +2188,71 @@ export class World {
         }
 
         this.obstacles.assertInternalConsistency();
+
+        for (
+            const [
+                domainHandle,
+                field,
+            ] of
+            this.domainObstacleFields
+        ) {
+            const domain =
+                [...this.domains.values()]
+                    .find(
+                        candidate =>
+                            candidate.handle ===
+                            domainHandle,
+                    );
+
+            if (!domain) {
+                throw new Error(
+                    `Obstacle field references missing world domain handle: ${domainHandle}`,
+                );
+            }
+
+            if (
+                field.obstacles.size ===
+                0
+            ) {
+                throw new Error(
+                    `Empty obstacle field retained for world domain: ${domain.id}`,
+                );
+            }
+
+            field.assertInternalConsistency();
+        }
+
+        if (
+            this.obstacleDomains.size !==
+            diagnostics.obstacleCount
+        ) {
+            throw new Error(
+                "Obstacle domain registry drift",
+            );
+        }
+
+        for (
+            const [
+                obstacleId,
+                domainId,
+            ] of
+            this.obstacleDomains
+        ) {
+            const field =
+                this.#obstacleFieldForDomain(
+                    domainId,
+                );
+
+            if (
+                !field?.obstacles.has(
+                    obstacleId,
+                )
+            ) {
+                throw new Error(
+                    `Obstacle domain registry references missing obstacle: ${String(obstacleId)}`,
+                );
+            }
+        }
 
         return diagnostics;
     }
