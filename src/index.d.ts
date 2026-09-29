@@ -45,7 +45,7 @@ export interface Journey {
     entryPoint: Vec2 | null;
     legIndex: number;
     pointIndex: number;
-    validatedGraphRevision: number;
+    validatedGraphRevision: number | string;
     roadEntered?: boolean;
 }
 
@@ -401,10 +401,102 @@ export class World<T extends Entity = Entity> {
     assertInternalConsistency(): WorldDiagnostics;
 }
 
+export interface NavigationInstanceDiagnostics {
+    domainId: string;
+    topologyId: string;
+    revision: number;
+    overrideRoadCount: number;
+    overrideEffectCount: number;
+}
+
+export class NavigationInstance {
+    readonly domainId: string;
+    readonly topologyId: string;
+    readonly topology: Navigation;
+    readonly roadEffects: Map<
+        NavigationId,
+        Map<string, RoadEffect>
+    >;
+    readonly nodes: Map<NavigationId, NavigationNode>;
+    readonly roads: Map<NavigationId, Road>;
+    readonly graphRevision: string;
+    readonly revision: number;
+    readonly overrideRoadCount: number;
+    readonly overrideEffectCount: number;
+
+    setRoadEffect(
+        effectId: string,
+        roadId: NavigationId,
+        effect?: Partial<RoadEffect>,
+    ): boolean;
+    removeRoadEffect(
+        effectId: string,
+        roadId: NavigationId,
+    ): boolean;
+    clearRoadEffect(effectId: string): boolean;
+    roadCostMultiplier(road: NavigationId | Road): number;
+    canTraverseRoad(
+        road: NavigationId | Road,
+        mobility: Mobility,
+    ): boolean;
+    isRouteLegCurrent(
+        leg: RouteLeg,
+        mobility: Mobility,
+    ): boolean;
+    isRouteCurrent(
+        route: Route,
+        mobility: Mobility,
+        startLegIndex?: number,
+    ): boolean;
+    adoptRoute(route: Route): Route;
+    nodeAt(position: Vec2, tolerance?: number): NavigationNode | null;
+    nearestNode(position: Vec2): NavigationNode | null;
+    nearestNodeWithDistance(position: Vec2): {
+        node: NavigationNode;
+        distance: number;
+    } | null;
+    roadAt(
+        position: Vec2,
+        extraTolerance?: number,
+        options?: {
+            includeDisabled?: boolean;
+        },
+    ): RoadHit | null;
+    findNavigationEntries(
+        position: Vec2,
+        mobility: Mobility,
+        options?: {
+            maxDistance?: number;
+            maxEntries?: number;
+        },
+    ): NavigationEntry[];
+    findRouteFromPosition(
+        position: Vec2,
+        destinationNodeId: NavigationId,
+        mobility: Mobility,
+        options?: JourneyStartOptions,
+    ): RoutePlan | null;
+    findHierarchicalRoute(
+        startNodeId: NavigationId,
+        destinationNodeId: NavigationId,
+        mobility: Mobility,
+    ): Route | null;
+    findRoute(
+        startNodeId: NavigationId,
+        destinationNodeId: NavigationId,
+        mobility: Mobility,
+    ): Route | null;
+    getDiagnostics(): NavigationInstanceDiagnostics;
+    assertInternalConsistency(): NavigationInstanceDiagnostics;
+}
+
 export interface NavigationRegistryDiagnostics {
     topologyCount: number;
     boundDomainCount: number;
     referencedTopologyCount: number;
+    overriddenDomainCount: number;
+    overrideRoadCount: number;
+    overrideEffectCount: number;
     defaultTopologyId: string | null;
 }
 
@@ -415,6 +507,7 @@ export class NavigationRegistry {
 
     readonly topologies: Map<string, Navigation>;
     readonly domainBindings: Map<string, string>;
+    readonly domainInstances: Map<string, NavigationInstance>;
     defaultTopologyId: string | null;
 
     registerTopology(id: string, navigation: Navigation): Navigation;
@@ -423,14 +516,35 @@ export class NavigationRegistry {
     bindDomain(domainId: string, topologyId: string): Navigation;
     unbindDomain(domainId: string): boolean;
     topologyIdForDomain(domainId?: string): string | null;
-    navigationForDomain(domainId?: string): Navigation | null;
-    navigationForEntity(entity: Entity): Navigation | null;
+    setDomainRoadEffect(
+        domainId: string,
+        effectId: string,
+        roadId: NavigationId,
+        effect?: Partial<RoadEffect>,
+    ): NavigationInstance;
+    removeDomainRoadEffect(
+        domainId: string,
+        effectId: string,
+        roadId: NavigationId,
+    ): boolean;
+    clearDomainRoadEffect(
+        domainId: string,
+        effectId: string,
+    ): boolean;
+    clearDomainOverrides(domainId: string): boolean;
+    navigationForDomain(
+        domainId?: string,
+    ): Navigation | NavigationInstance | null;
+    navigationForEntity(
+        entity: Entity,
+    ): Navigation | NavigationInstance | null;
     getDiagnostics(): NavigationRegistryDiagnostics;
     assertInternalConsistency(): NavigationRegistryDiagnostics;
 }
 
 export type NavigationSource =
     | Navigation
+    | NavigationInstance
     | NavigationRegistry;
 
 export interface NavigationOptions {
