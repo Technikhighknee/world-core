@@ -718,6 +718,24 @@ function validateNavigationTopology(
                     "expected number >= 1",
                 );
             }
+            if (
+                effect.traversalDelaySeconds !==
+                undefined
+            ) {
+                requireFinite(
+                    effect.traversalDelaySeconds,
+                    `${effectPath}.traversalDelaySeconds`,
+                );
+                if (
+                    effect.traversalDelaySeconds <
+                    0
+                ) {
+                    fail(
+                        `${effectPath}.traversalDelaySeconds`,
+                        "expected number >= 0",
+                    );
+                }
+            }
         }
 
     }
@@ -1021,6 +1039,24 @@ export function validateWorldCoreSnapshot(
                     `${effectPath}.costMultiplier`,
                     "expected number >= 1",
                 );
+            }
+            if (
+                effect.traversalDelaySeconds !==
+                undefined
+            ) {
+                requireFinite(
+                    effect.traversalDelaySeconds,
+                    `${effectPath}.traversalDelaySeconds`,
+                );
+                if (
+                    effect.traversalDelaySeconds <
+                    0
+                ) {
+                    fail(
+                        `${effectPath}.traversalDelaySeconds`,
+                        "expected number >= 0",
+                    );
+                }
             }
 
             const key =
@@ -1708,6 +1744,25 @@ export function validateWorldCoreSnapshot(
                 journey.pointIndex,
                 `${path}.journey.pointIndex`,
             );
+
+            if (
+                journey.roadDelayRemaining !==
+                undefined
+            ) {
+                requireFinite(
+                    journey.roadDelayRemaining,
+                    `${path}.journey.roadDelayRemaining`,
+                );
+                if (
+                    journey.roadDelayRemaining <
+                    0
+                ) {
+                    fail(
+                        `${path}.journey.roadDelayRemaining`,
+                        "expected number >= 0",
+                    );
+                }
+            }
 
             if (
                 journey.legIndex >
