@@ -285,6 +285,38 @@ export class World {
         );
     }
 
+    #recalculateDomainMaxRadius(
+        domain,
+    ) {
+        let maxRadius = 0;
+
+        for (
+            const entityId of
+            this.spatial.members(
+                domain.handle,
+            )
+        ) {
+            const entity =
+                this.entities.get(
+                    entityId,
+                );
+
+            if (!entity) continue;
+
+            const radius =
+                entity.body?.radius ??
+                0;
+
+            if (radius > maxRadius) {
+                maxRadius = radius;
+            }
+        }
+
+        domain.maxEntityRadius =
+            maxRadius;
+        return maxRadius;
+    }
+
     addDomain({ id }) {
         if (
             typeof id !== "string" ||
@@ -306,6 +338,7 @@ export class World {
             handle:
                 this.nextDomainHandle++,
             entityCount: 0,
+            maxEntityRadius: 0,
         };
 
         this.domains.set(id, domain);
@@ -821,6 +854,11 @@ export class World {
 
         this.entities.set(stored.id, stored);
         domain.entityCount++;
+        domain.maxEntityRadius =
+            Math.max(
+                domain.maxEntityRadius,
+                radius,
+            );
 
         this.spatial.upsertPoint(
             stored.id,
@@ -840,17 +878,35 @@ export class World {
         if (!entity) return false;
 
         this.unmarkMoving(entityId);
-        this.spatial.remove(entityId);
-        this.#untrackRadius(entity.body?.radius ?? 0);
 
         const domain =
             this.#requireDomain(
                 entity.domainId,
             );
+        const radius =
+            entity.body?.radius ??
+            0;
+
+        this.spatial.remove(entityId);
+        this.#untrackRadius(radius);
 
         domain.entityCount--;
 
-        return this.entities.delete(entityId);
+        const removed =
+            this.entities.delete(
+                entityId,
+            );
+
+        if (
+            radius ===
+            domain.maxEntityRadius
+        ) {
+            this.#recalculateDomainMaxRadius(
+                domain,
+            );
+        }
+
+        return removed;
     }
 
     getEntity(entityId) {
@@ -932,6 +988,26 @@ export class World {
 
             previousDomain.entityCount--;
             nextDomain.entityCount++;
+
+            const radius =
+                entity.body?.radius ??
+                0;
+
+            nextDomain.maxEntityRadius =
+                Math.max(
+                    nextDomain.maxEntityRadius,
+                    radius,
+                );
+
+            if (
+                radius ===
+                previousDomain
+                    .maxEntityRadius
+            ) {
+                this.#recalculateDomainMaxRadius(
+                    previousDomain,
+                );
+            }
         } catch (error) {
             entity.domainId =
                 previousDomain.id;
@@ -944,6 +1020,13 @@ export class World {
                 entity.id,
                 previousDomain.handle,
                 entity.position,
+            );
+
+            this.#recalculateDomainMaxRadius(
+                previousDomain,
+            );
+            this.#recalculateDomainMaxRadius(
+                nextDomain,
             );
 
             throw error;
@@ -1054,6 +1137,26 @@ export class World {
 
         this.#untrackRadius(previous);
         this.#trackRadius(radius);
+
+        const domain =
+            this.#requireDomain(
+                entity.domainId,
+            );
+
+        if (
+            radius >=
+            domain.maxEntityRadius
+        ) {
+            domain.maxEntityRadius =
+                radius;
+        } else if (
+            previous ===
+            domain.maxEntityRadius
+        ) {
+            this.#recalculateDomainMaxRadius(
+                domain,
+            );
+        }
     }
 
     configureLocalSteering(options = {}) {
@@ -1624,7 +1727,7 @@ export class World {
             candidates,
             domain.handle,
             position,
-            radius + this.maxEntityRadius,
+            radius + domain.maxEntityRadius,
         );
 
         for (const entityId of candidates) {
@@ -1684,10 +1787,10 @@ export class World {
         this.spatial.queryBoundsInto(
             candidates,
             domain.handle,
-            minX - this.maxEntityRadius,
-            minY - this.maxEntityRadius,
-            maxX + this.maxEntityRadius,
-            maxY + this.maxEntityRadius,
+            minX - domain.maxEntityRadius,
+            minY - domain.maxEntityRadius,
+            maxX + domain.maxEntityRadius,
+            maxY + domain.maxEntityRadius,
         );
 
         for (const entityId of candidates) {
@@ -1761,7 +1864,7 @@ export class World {
 
         const candidates = buffer.candidates;
         const results = buffer.results;
-        const broadRadius = radius + this.maxEntityRadius;
+        const broadRadius = radius + domain.maxEntityRadius;
 
         results.length = 0;
 
@@ -1868,7 +1971,7 @@ export class World {
             candidates = this.spatial.queryRadius(
                 domain.handle,
                 position,
-                maxDistance + this.maxEntityRadius,
+                maxDistance + domain.maxEntityRadius,
             );
         } else {
             candidates =
@@ -2009,6 +2112,8 @@ export class World {
 
         const actualDomainCounts =
             new Map();
+        const actualDomainMaxRadii =
+            new Map();
 
         for (
             const entity of
@@ -2032,6 +2137,17 @@ export class World {
                     ) ?? 0
                 ) + 1,
             );
+
+            actualDomainMaxRadii.set(
+                entity.domainId,
+                Math.max(
+                    actualDomainMaxRadii.get(
+                        entity.domainId,
+                    ) ?? 0,
+                    entity.body?.radius ??
+                        0,
+                ),
+            );
         }
 
         let domainEntityCount = 0;
@@ -2049,7 +2165,11 @@ export class World {
                 !Number.isInteger(
                     domain.entityCount,
                 ) ||
-                domain.entityCount < 0
+                domain.entityCount < 0 ||
+                !Number.isFinite(
+                    domain.maxEntityRadius,
+                ) ||
+                domain.maxEntityRadius < 0
             ) {
                 throw new Error(
                     `Invalid world domain state: ${domainId}`,
@@ -2067,6 +2187,20 @@ export class World {
             ) {
                 throw new Error(
                     `World domain entity drift for ${domainId}: ${domain.entityCount} tracked for ${actualCount} entities`,
+                );
+            }
+
+            const actualMaxRadius =
+                actualDomainMaxRadii.get(
+                    domainId,
+                ) ?? 0;
+
+            if (
+                domain.maxEntityRadius !==
+                actualMaxRadius
+            ) {
+                throw new Error(
+                    `World domain radius drift for ${domainId}: ${domain.maxEntityRadius} tracked for ${actualMaxRadius}`,
                 );
             }
 
