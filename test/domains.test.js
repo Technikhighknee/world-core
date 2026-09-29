@@ -1879,3 +1879,107 @@ test("sparse domain navigation overrides survive v1 snapshot round-trips", () =>
     restored.world
         .assertInternalConsistency();
 });
+
+test("navigation instances stay sparse across many shared-topology domain bindings", () => {
+    const topology =
+        new Navigation();
+
+    topology.addNode({
+        id: "a",
+        x: 0,
+        y: 0,
+    });
+    topology.addNode({
+        id: "b",
+        x: 10,
+        y: 0,
+    });
+    topology.addRoad({
+        id: "hall",
+        from: "a",
+        to: "b",
+    });
+
+    const registry =
+        new NavigationRegistry();
+    registry.registerTopology(
+        "layout",
+        topology,
+    );
+
+    const domainCount = 10_000;
+    const overriddenCount = 10;
+
+    for (
+        let index = 0;
+        index < domainCount;
+        index++
+    ) {
+        registry.bindDomain(
+            `house-${index}`,
+            "layout",
+        );
+    }
+
+    assert.equal(
+        registry.domainInstances.size,
+        0,
+    );
+
+    for (
+        let index = 0;
+        index < overriddenCount;
+        index++
+    ) {
+        registry.setDomainRoadEffect(
+            `house-${index}`,
+            "closed",
+            "hall",
+            {
+                blocked: true,
+            },
+        );
+    }
+
+    const diagnostics =
+        registry
+            .assertInternalConsistency();
+
+    assert.equal(
+        diagnostics.boundDomainCount,
+        domainCount,
+    );
+    assert.equal(
+        diagnostics.topologyCount,
+        1,
+    );
+    assert.equal(
+        diagnostics.overriddenDomainCount,
+        overriddenCount,
+    );
+    assert.equal(
+        diagnostics.overrideRoadCount,
+        overriddenCount,
+    );
+    assert.equal(
+        diagnostics.overrideEffectCount,
+        overriddenCount,
+    );
+
+    for (
+        let index = 0;
+        index < overriddenCount;
+        index++
+    ) {
+        registry.removeDomainRoadEffect(
+            `house-${index}`,
+            "closed",
+            "hall",
+        );
+    }
+
+    assert.equal(
+        registry.domainInstances.size,
+        0,
+    );
+});
