@@ -1206,18 +1206,6 @@ export function validateWorldCoreSnapshot(
                 ],
             ),
         );
-    const entityIndexByKey =
-        new Map(
-            entities.map(
-                (serialized, index) => [
-                    nodeKey(
-                        serialized.entity.id,
-                    ),
-                    index,
-                ],
-            ),
-        );
-
     let journeyCount = 0;
 
     for (
@@ -1245,6 +1233,21 @@ export function validateWorldCoreSnapshot(
             requireNonNegative(
                 entity.body.radius,
                 `${path}.entity.body.radius`,
+            );
+        }
+
+        if (
+            entity.simulation
+                ?.movementInterval !==
+                undefined &&
+            entity.simulation
+                ?.movementInterval !==
+                null
+        ) {
+            requireNonNegative(
+                entity.simulation
+                    .movementInterval,
+                `${path}.entity.simulation.movementInterval`,
             );
         }
 
@@ -1642,11 +1645,6 @@ export function validateWorldCoreSnapshot(
             undefined &&
             explicitInterval !== null
         ) {
-            requireNonNegative(
-                explicitInterval,
-                `$.entities[${entityIndexByKey.get(nodeKey(entityId))}].entity.simulation.movementInterval`,
-            );
-
             if (explicitInterval > 0) {
                 expectedIntervals.add(
                     explicitInterval,
