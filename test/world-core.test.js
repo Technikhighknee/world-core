@@ -2031,6 +2031,7 @@ test("package self-reference exposes only the intended public API", async () => 
             "DEFAULT_WORLD_DOMAIN_ID",
             "MOBILITY_PROFILES",
             "Navigation",
+            "NavigationRegistry",
             "WORLD_CORE_SNAPSHOT_VERSION",
             "World",
             "computeWorldCoreStateHash",
