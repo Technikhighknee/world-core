@@ -490,6 +490,16 @@ export function serializeWorldCore(
 
         world: {
             time: world.time,
+            domains:
+                [...world.domains.values()]
+                    .sort(
+                        (a, b) =>
+                            a.handle -
+                            b.handle,
+                    )
+                    .map(domain => ({
+                        id: domain.id,
+                    })),
             spatialCellSize:
                 world.spatial.cellSize,
             obstacleCellSize:
@@ -559,6 +569,8 @@ export function deserializeWorldCore(
             snapshot.world.movementLodTiers,
         simulationRegions:
             snapshot.world.simulationRegions ?? [],
+        domains:
+            snapshot.world.domains ?? [],
         interestPoints:
             snapshot.world.interestPoints,
         localSteering:
