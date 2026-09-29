@@ -666,3 +666,89 @@ test("scheduler validation accepts explicit mover intervals independent of world
         true,
     );
 });
+
+
+test("public position changes immediately reclassify moving entities for region LOD snapshots", () => {
+    const navigation =
+        buildNavigation();
+    const world = new World({
+        simulationRegions: [
+            {
+                id: "coarse",
+                minX: -5,
+                minY: -5,
+                maxX: 5,
+                maxY: 5,
+                movementInterval: 7,
+            },
+        ],
+    });
+
+    world.addEntity({
+        id: "walker",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility:
+            mobilityProfile(
+                "pedestrian",
+            ),
+    });
+
+    startJourney(
+        world,
+        navigation,
+        "walker",
+        "c",
+    );
+
+    assert.deepEqual(
+        serializeWorldCore(
+            world,
+            navigation,
+        ).world.movementAccumulators,
+        [[7, 0]],
+    );
+
+    world.setPosition(
+        "walker",
+        {
+            x: 10,
+            y: 0,
+        },
+    );
+
+    const snapshot =
+        serializeWorldCore(
+            world,
+            navigation,
+        );
+
+    assert.deepEqual(
+        snapshot.world
+            .movementAccumulators,
+        [],
+    );
+
+    assert.equal(
+        validateWorldCoreSnapshot(
+            snapshot,
+        ),
+        true,
+    );
+
+    const restored =
+        deserializeWorldCore(
+            structuredClone(
+                snapshot,
+            ),
+        );
+
+    assert.equal(
+        restored.world
+            .entityMovementIntervals
+            .has("walker"),
+        false,
+    );
+});
