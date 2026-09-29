@@ -115,3 +115,54 @@ test("multi-target routing is deterministic on equal-cost destinations", () => {
   assert.ok(route);
   assert.equal(route.destinationNodeId, "a");
 });
+
+
+test("findRouteCostsToMany settles many destinations in one traversal", () => {
+  const navigation = buildNavigation();
+
+  const costs = navigation.findRouteCostsToMany(
+    "start",
+    ["far", "near", "junction"],
+    mobility
+  );
+
+  assert.equal(costs.get("junction"), 10);
+  assert.equal(costs.get("near"), 20);
+  assert.equal(costs.get("far"), 40);
+});
+
+test("findRouteCostsFromPositionToMany combines road-prefix cost once", () => {
+  const navigation = buildNavigation();
+
+  const costs = navigation.findRouteCostsFromPositionToMany(
+    { x: 5, y: 0 },
+    ["near", "far"],
+    mobility
+  );
+
+  assert.equal(costs.get("near"), 15);
+  assert.equal(costs.get("far"), 35);
+});
+
+test("multi-target cost queries honor domain road effects", () => {
+  const topology = buildNavigation();
+  const registry = new NavigationRegistry();
+  registry.registerTopology("shared", topology);
+  registry.bindDomain("domain", "shared");
+  registry.setDomainRoadEffect(
+    "domain",
+    "block-near",
+    "junction-near",
+    { blocked: true }
+  );
+
+  const navigation = registry.navigationForDomain("domain");
+  const costs = navigation.findRouteCostsToMany(
+    "start",
+    ["near", "far"],
+    mobility
+  );
+
+  assert.equal(costs.has("near"), false);
+  assert.equal(costs.get("far"), 40);
+});
