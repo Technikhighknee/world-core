@@ -1,6 +1,6 @@
 {
   "name": "world-core",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Scalable 2D world, navigation and movement simulation core",
   "main": "./src/index.js",
   "scripts": {
