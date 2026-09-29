@@ -710,14 +710,14 @@ export interface WorldCoreSnapshot {
 
 export function serializeWorldCore(
     world: World,
-    navigation: Navigation,
+    navigation: NavigationSource,
 ): WorldCoreSnapshot;
 
 export function deserializeWorldCore(
     snapshot: unknown,
 ): {
     world: World;
-    navigation: Navigation;
+    navigation: NavigationSource;
 };
 
 export const WORLD_CORE_SNAPSHOT_VERSION: number;
@@ -739,10 +739,10 @@ export interface WorldCoreStateHashes {
 
 export function computeWorldCoreStateHash(
     world: World,
-    navigation: Navigation,
+    navigation: NavigationSource,
 ): string;
 
 export function computeWorldCoreStateHashes(
     world: World,
-    navigation: Navigation,
+    navigation: NavigationSource,
 ): WorldCoreStateHashes;
