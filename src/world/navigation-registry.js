@@ -24,6 +24,9 @@ function requireRoadEffect(
     const costMultiplier =
         effect?.costMultiplier ??
         1;
+    const traversalDelaySeconds =
+        effect?.traversalDelaySeconds ??
+        0;
 
     if (
         !Number.isFinite(
@@ -36,9 +39,21 @@ function requireRoadEffect(
         );
     }
 
+    if (
+        !Number.isFinite(
+            traversalDelaySeconds,
+        ) ||
+        traversalDelaySeconds < 0
+    ) {
+        throw new Error(
+            "Road effect traversalDelaySeconds must be finite and greater than or equal to 0",
+        );
+    }
+
     return {
         blocked,
         costMultiplier,
+        traversalDelaySeconds,
     };
 }
 
@@ -67,6 +82,11 @@ export class NavigationInstance {
             roadCostMultiplier:
                 road =>
                     this.#overlayRoadCostMultiplier(
+                        road,
+                    ),
+            roadTraversalDelaySeconds:
+                road =>
+                    this.#overlayRoadTraversalDelaySeconds(
                         road,
                     ),
         };
@@ -133,6 +153,31 @@ export class NavigationInstance {
         return multiplier;
     }
 
+    #overlayRoadTraversalDelaySeconds(
+        road,
+    ) {
+        const effects =
+            this.roadEffects.get(
+                road.id,
+            );
+
+        if (!effects) {
+            return 0;
+        }
+
+        let delay = 0;
+
+        for (
+            const effect of
+            effects.values()
+        ) {
+            delay +=
+                effect.traversalDelaySeconds;
+        }
+
+        return delay;
+    }
+
     #touch() {
         this.revision++;
     }
@@ -187,7 +232,8 @@ export class NavigationInstance {
 
         if (
             !next.blocked &&
-            next.costMultiplier === 1
+            next.costMultiplier === 1 &&
+            next.traversalDelaySeconds === 0
         ) {
             if (!previous) {
                 return false;
@@ -210,7 +256,9 @@ export class NavigationInstance {
             previous.blocked ===
                 next.blocked &&
             previous.costMultiplier ===
-                next.costMultiplier
+                next.costMultiplier &&
+            previous.traversalDelaySeconds ===
+                next.traversalDelaySeconds
         ) {
             return false;
         }
@@ -300,6 +348,16 @@ export class NavigationInstance {
     ) {
         return this.topology
             .roadCostMultiplier(
+                roadOrId,
+                this.runtimePolicy,
+            );
+    }
+
+    roadTraversalDelaySeconds(
+        roadOrId,
+    ) {
+        return this.topology
+            .roadTraversalDelaySeconds(
                 roadOrId,
                 this.runtimePolicy,
             );
