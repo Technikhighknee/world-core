@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [master]
+    branches: [master, feat/multi-target-routing]
   pull_request:
     branches: [master]
 
