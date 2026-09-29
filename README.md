@@ -109,6 +109,7 @@ npm run bench:churn
 npm run bench:soak
 npm run bench:retention
 npm run bench:domains
+npm run bench:domain-movement
 ```
 
 All benchmarks run with `--expose-gc`. This is intentional: the reports distinguish memory that is merely waiting for garbage collection from memory that remains reachable after forced full collections.
