@@ -476,6 +476,17 @@ export class NavigationInstance {
         mobility: Mobility,
         options?: JourneyStartOptions,
     ): RoutePlan | null;
+    findRouteFromPositionToAny(
+        position: Vec2,
+        destinationNodeIds: Iterable<NavigationId>,
+        mobility: Mobility,
+        options?: JourneyStartOptions,
+    ): RoutePlan | null;
+    findRouteToAny(
+        startNodeId: NavigationId,
+        destinationNodeIds: Iterable<NavigationId>,
+        mobility: Mobility,
+    ): Route | null;
     findHierarchicalRoute(
         startNodeId: NavigationId,
         destinationNodeId: NavigationId,
@@ -680,6 +691,19 @@ export class Navigation {
         mobility: Mobility,
         options?: JourneyStartOptions,
     ): RoutePlan | null;
+
+    findRouteFromPositionToAny(
+        position: Vec2,
+        destinationNodeIds: Iterable<NavigationId>,
+        mobility: Mobility,
+        options?: JourneyStartOptions,
+    ): RoutePlan | null;
+
+    findRouteToAny(
+        startNodeId: NavigationId,
+        destinationNodeIds: Iterable<NavigationId>,
+        mobility: Mobility,
+    ): Route | null;
 
     findHierarchicalRoute(
         startNodeId: NavigationId,
