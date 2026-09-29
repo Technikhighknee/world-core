@@ -86,9 +86,20 @@ navigation.bindDomain("house-1", "small-house");
 navigation.bindDomain("house-2", "small-house");
 ```
 
-A registered topology is shared state: mutating that `Navigation` changes it for every bound domain. Per-instance navigation overrides are intentionally not synthesized by cloning the topology. Dynamic obstacles are domain-scoped and allocated lazily; static repeated geometry belongs in shared topology data.
+A registered topology is shared state: mutating that `Navigation` changes it for every bound domain. Domain-specific routing state is a sparse overlay rather than a graph clone. A `NavigationInstance` is created lazily only when a bound domain actually has an override:
 
-Snapshots remain format version 1. Registry snapshots store each shared navigation topology once, persist domain-to-topology bindings, and tag active journey routes with their topology identity.
+```js
+navigation.setDomainRoadEffect(
+  "house-1",
+  "locked-bedroom-door",
+  "hall-bedroom",
+  { blocked: true }
+);
+```
+
+`house-2` still uses the shared topology directly. Clearing the last override removes the instance again. Dynamic obstacles follow the same sparse domain model; static repeated geometry belongs in shared topology data.
+
+Snapshots remain format version 1. Registry snapshots store each shared navigation topology once, persist domain-to-topology bindings and sparse domain road effects, and tag active journey routes with their topology identity.
 
 ## Benchmarking
 
@@ -101,6 +112,8 @@ npm run bench:domains
 ```
 
 All benchmarks run with `--expose-gc`. This is intentional: the reports distinguish memory that is merely waiting for garbage collection from memory that remains reachable after forced full collections.
+
+`npm run bench:domains` specifically measures large-domain overhead. Its default workload creates 100,000 domains, binds them to one shared navigation topology, adds sparse overrides to only a subset, runs empty-world ticks and performs repeated cross-domain transfers. It asserts that empty domains allocate no spatial cells and that only overridden domains allocate `NavigationInstance` state.
 
 ### Standard scalability benchmark
 
@@ -183,7 +196,7 @@ Movement emits deterministic lifecycle events for journey start, reroute, cancel
 
 `serializeWorldCore(world, navigation)` returns a JSON-safe versioned snapshot. `deserializeWorldCore(snapshot)` restores a fresh `World` and `Navigation` pair.
 
-Snapshots preserve dynamic road state and versions, world time, spatial domains, domain-scoped obstacles, entities, body state, mobility, active journeys, shared journey routes, shared navigation topology registries and interval accumulators. Route caches and pending movement events are intentionally transient and are not restored.
+Snapshots preserve dynamic road state and versions, world time, spatial domains, domain-scoped obstacles, entities, body state, mobility, active journeys, shared journey routes, shared navigation topology registries, bindings and sparse per-domain road effects. Route caches and pending movement events are intentionally transient and are not restored.
 
 
 ## Steering stress and stability
