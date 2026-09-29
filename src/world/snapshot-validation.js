@@ -1,6 +1,9 @@
 import {
     MOBILITY_PROFILES,
 } from "./mobility-profiles.js";
+import {
+    DEFAULT_WORLD_DOMAIN_ID,
+} from "./world.js";
 
 function fail(path, message) {
     throw new Error(
@@ -767,6 +770,54 @@ export function validateWorldCoreSnapshot(
         "$.world.obstacleCellSize",
     );
 
+    const domains =
+        requireArray(
+            world.domains ?? [
+                {
+                    id:
+                        DEFAULT_WORLD_DOMAIN_ID,
+                },
+            ],
+            "$.world.domains",
+        );
+
+    const domainIds =
+        requireUniqueIds(
+            domains,
+            "$.world.domains",
+            domain => {
+                requireObject(
+                    domain,
+                    "$.world.domains[]",
+                );
+
+                if (
+                    typeof domain.id !==
+                        "string" ||
+                    domain.id.length === 0
+                ) {
+                    fail(
+                        "$.world.domains[].id",
+                        "expected non-empty string",
+                    );
+                }
+
+                return domain.id;
+            },
+        );
+
+    if (
+        !domainIds.has(
+            "string:" +
+                DEFAULT_WORLD_DOMAIN_ID,
+        )
+    ) {
+        fail(
+            "$.world.domains",
+            `missing required default domain ${DEFAULT_WORLD_DOMAIN_ID}`,
+        );
+    }
+
     const obstacles =
         requireArray(
             world.obstacles ?? [],
@@ -1225,6 +1276,33 @@ export function validateWorldCoreSnapshot(
             entity.position,
             `${path}.entity.position`,
         );
+
+        const entityDomainId =
+            entity.domainId ??
+            DEFAULT_WORLD_DOMAIN_ID;
+
+        if (
+            typeof entityDomainId !==
+                "string" ||
+            entityDomainId.length === 0
+        ) {
+            fail(
+                `${path}.entity.domainId`,
+                "expected non-empty string",
+            );
+        }
+
+        if (
+            !domainIds.has(
+                "string:" +
+                    entityDomainId,
+            )
+        ) {
+            fail(
+                `${path}.entity.domainId`,
+                "references missing world domain",
+            );
+        }
 
         if (
             entity.body?.radius !==
