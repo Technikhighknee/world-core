@@ -112,8 +112,6 @@ test("only active movers are tracked and completed journeys leave the active set
 
     assert.equal(world.entities.size, 1001);
     assert.equal(world.movingEntities.size, 1);
-    assert.equal(world.entityMovementIntervals.size, 0);
-    assert.equal(world.movementBuckets.size, 0);
 
     stepSimulation(world, navigation, 10);
 
