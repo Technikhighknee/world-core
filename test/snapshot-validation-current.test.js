@@ -102,7 +102,7 @@ function buildPrefixSnapshot() {
             world,
             navigation,
             "walker",
-            "b",
+            "c",
         ),
         true,
     );
