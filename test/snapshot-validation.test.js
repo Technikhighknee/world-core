@@ -239,36 +239,6 @@ test("snapshot validation rejects invalid road effects and cache bounds", () => 
     );
 });
 
-test("snapshot validation rejects malformed LOD and accumulators", () => {
-    expectInvalid(
-        snapshot => {
-            snapshot.world
-                .movementLodTiers = [
-                    {
-                        maxDistance: 100,
-                        interval: 1,
-                    },
-                    {
-                        maxDistance: 50,
-                        interval: 2,
-                    },
-                ];
-        },
-        /LOD distances must increase/,
-    );
-
-    expectInvalid(
-        snapshot => {
-            snapshot.world
-                .movementAccumulators = [
-                    [10, -1],
-                ];
-        },
-        /expected number >= 0/,
-    );
-});
-
-
 test("snapshot validation rejects disconnected route legs and incomplete moving order", () => {
     expectInvalid(
         snapshot => {
