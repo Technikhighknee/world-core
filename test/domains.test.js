@@ -1386,3 +1386,111 @@ test("failed domain transfer leaves entity and spatial state unchanged", async (
 
     world.assertInternalConsistency();
 });
+
+
+test("large bodies in one domain do not inflate spatial broadphase in another", () => {
+    const world =
+        new World({
+            spatialCellSize: 10,
+        });
+
+    world.addDomain({
+        id: "outside",
+    });
+    world.addDomain({
+        id: "tiny-room",
+    });
+
+    world.addEntity({
+        id: "giant",
+        domainId: "outside",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        body: {
+            radius: 1000,
+        },
+    });
+    world.addEntity({
+        id: "person",
+        domainId: "tiny-room",
+        position: {
+            x: 5,
+            y: 5,
+        },
+        body: {
+            radius: 0.35,
+        },
+    });
+
+    assert.equal(
+        world.maxEntityRadius,
+        1000,
+    );
+    assert.equal(
+        world.getDomain(
+            "outside",
+        ).maxEntityRadius,
+        1000,
+    );
+    assert.equal(
+        world.getDomain(
+            "tiny-room",
+        ).maxEntityRadius,
+        0.35,
+    );
+
+    const originalQuery =
+        world.spatial
+            .queryRadiusInto
+            .bind(world.spatial);
+    let queriedRadius = null;
+
+    world.spatial.queryRadiusInto =
+        (
+            result,
+            domainHandle,
+            position,
+            radius,
+        ) => {
+            queriedRadius = radius;
+
+            return originalQuery(
+                result,
+                domainHandle,
+                position,
+                radius,
+            );
+        };
+
+    assert.equal(
+        world.queryRadius(
+            { x: 5, y: 5 },
+            2,
+            {
+                domainId:
+                    "tiny-room",
+            },
+        )[0].id,
+        "person",
+    );
+
+    assert.equal(
+        queriedRadius,
+        2.35,
+    );
+
+    world.removeEntity(
+        "giant",
+    );
+
+    assert.equal(
+        world.getDomain(
+            "outside",
+        ).maxEntityRadius,
+        0,
+    );
+
+    world.assertInternalConsistency();
+});
