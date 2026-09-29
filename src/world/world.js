@@ -524,53 +524,21 @@ export class World {
 
                 if (
                     this.eventOverflowPolicy ===
-                    "drop-oldest" &&
+                        "drop-oldest" &&
                     this.eventQueueLimit >
                         0
                 ) {
                     this.events.shift();
+                    this.events.push(
+                        event,
+                    );
+                    queued = true;
                 }
-            }
-
-            if (
-                this.eventQueueLimit >
-                    0 &&
-                !(
-                    this.events.length >=
-                        this.eventQueueLimit &&
-                    this.eventOverflowPolicy ===
-                        "drop-newest"
-                )
-            ) {
+            } else {
                 this.events.push(
                     event,
                 );
                 queued = true;
-            } else if (
-                this.eventQueueLimit ===
-                0 &&
-                this.events.length ===
-                    0
-            ) {
-                // A zero-capacity queue drops every captured event.
-                // Overflow was already counted above when appropriate.
-                if (
-                    this.droppedEventCount ===
-                    0 ||
-                    this.eventQueueLimit ===
-                        0
-                ) {
-                    // Preserve the prior accounting rule: every emitted
-                    // event against a zero-sized queue counts as dropped.
-                    if (
-                        !(
-                            this.events.length >=
-                            this.eventQueueLimit
-                        )
-                    ) {
-                        this.droppedEventCount++;
-                    }
-                }
             }
         }
 
