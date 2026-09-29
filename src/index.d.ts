@@ -193,6 +193,7 @@ export interface WorldDomain {
     id: string;
     readonly handle: number;
     readonly entityCount: number;
+    readonly maxEntityRadius: number;
 }
 
 export interface WorldOptions {
