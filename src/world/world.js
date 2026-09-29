@@ -25,6 +25,7 @@ export class World {
         this.entities = new Map();
 
         this.domains = new Map();
+        this.domainsByHandle = [];
         this.nextDomainHandle = 0;
         this.addDomain({
             id: DEFAULT_WORLD_DOMAIN_ID,
@@ -308,6 +309,9 @@ export class World {
         };
 
         this.domains.set(id, domain);
+        this.domainsByHandle[
+            domain.handle
+        ] = domain;
         return domain;
     }
 
@@ -350,6 +354,9 @@ export class World {
         this.domainObstacleFields.delete(
             domain.handle,
         );
+        this.domainsByHandle[
+            domain.handle
+        ] = undefined;
 
         return this.domains.delete(
             domainId,
@@ -2197,12 +2204,9 @@ export class World {
             this.domainObstacleFields
         ) {
             const domain =
-                [...this.domains.values()]
-                    .find(
-                        candidate =>
-                            candidate.handle ===
-                            domainHandle,
-                    );
+                this.domainsByHandle[
+                    domainHandle
+                ];
 
             if (!domain) {
                 throw new Error(
