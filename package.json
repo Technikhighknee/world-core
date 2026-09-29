@@ -16,7 +16,8 @@
     "bench:snapshot": "node --expose-gc benchmark/snapshot.js",
     "bench:guardrails": "node benchmark/guardrails.js",
     "example:mini-city": "node examples/mini-city.js",
-    "bench:domains": "node --expose-gc benchmark/domains.js"
+    "bench:domains": "node --expose-gc benchmark/domains.js",
+    "bench:domain-movement": "node --expose-gc benchmark/domain-movement.js"
   },
   "keywords": [
     "simulation",
