@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     DEFAULT_WORLD_DOMAIN_ID,
     Navigation,
+    NavigationRegistry,
     World,
     deserializeWorldCore,
     serializeWorldCore,
@@ -376,4 +377,286 @@ test("snapshot validation rejects entity references to missing domains", () => {
             ),
         /references missing world domain/,
     );
+});
+
+
+test("many domains can share one navigation topology without graph copies", () => {
+    const world = new World();
+    const topology =
+        new Navigation();
+    const navigation =
+        new NavigationRegistry();
+
+    topology.addNode({
+        id: "west",
+        x: 0,
+        y: 0,
+    });
+    topology.addNode({
+        id: "east",
+        x: 10,
+        y: 0,
+    });
+    topology.addRoad({
+        id: "hall",
+        from: "west",
+        to: "east",
+        width: 3,
+    });
+
+    navigation.registerTopology(
+        "small-house",
+        topology,
+    );
+
+    for (
+        let index = 0;
+        index < 10_000;
+        index++
+    ) {
+        const domainId =
+            `house-${index}`;
+
+        world.addDomain({
+            id: domainId,
+        });
+
+        navigation.bindDomain(
+            domainId,
+            "small-house",
+        );
+    }
+
+    assert.equal(
+        navigation.getDiagnostics()
+            .topologyCount,
+        1,
+    );
+    assert.equal(
+        navigation.getDiagnostics()
+            .boundDomainCount,
+        10_000,
+    );
+    assert.equal(
+        navigation.navigationForDomain(
+            "house-1",
+        ),
+        topology,
+    );
+    assert.equal(
+        navigation.navigationForDomain(
+            "house-9999",
+        ),
+        topology,
+    );
+
+    navigation.assertInternalConsistency();
+    world.assertInternalConsistency();
+});
+
+test("movement resolves different shared topologies per world domain", async () => {
+    const {
+        startJourney,
+        stepSimulation,
+    } = await import(
+        "../src/index.js"
+    );
+
+    const world = new World();
+    const registry =
+        new NavigationRegistry();
+
+    world.addDomain({
+        id: "short-house",
+    });
+    world.addDomain({
+        id: "long-house",
+    });
+
+    const short =
+        new Navigation();
+    short.addNode({
+        id: "start",
+        x: 0,
+        y: 0,
+    });
+    short.addNode({
+        id: "end",
+        x: 2,
+        y: 0,
+    });
+    short.addRoad({
+        id: "hall",
+        from: "start",
+        to: "end",
+    });
+
+    const long =
+        new Navigation();
+    long.addNode({
+        id: "start",
+        x: 0,
+        y: 0,
+    });
+    long.addNode({
+        id: "end",
+        x: 20,
+        y: 0,
+    });
+    long.addRoad({
+        id: "hall",
+        from: "start",
+        to: "end",
+    });
+
+    registry.registerTopology(
+        "short",
+        short,
+    );
+    registry.registerTopology(
+        "long",
+        long,
+    );
+    registry.bindDomain(
+        "short-house",
+        "short",
+    );
+    registry.bindDomain(
+        "long-house",
+        "long",
+    );
+
+    world.addEntity({
+        id: "short-walker",
+        domainId: "short-house",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+    world.addEntity({
+        id: "long-walker",
+        domainId: "long-house",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+
+    assert.equal(
+        startJourney(
+            world,
+            registry,
+            "short-walker",
+            "end",
+        ),
+        true,
+    );
+    assert.equal(
+        startJourney(
+            world,
+            registry,
+            "long-walker",
+            "end",
+        ),
+        true,
+    );
+
+    stepSimulation(
+        world,
+        registry,
+        3,
+    );
+
+    assert.equal(
+        world.getEntity(
+            "short-walker",
+        ).journey,
+        null,
+    );
+    assert.ok(
+        world.getEntity(
+            "long-walker",
+        ).journey,
+    );
+    assert.equal(
+        world.getEntity(
+            "short-walker",
+        ).position.x,
+        2,
+    );
+    assert.equal(
+        world.getEntity(
+            "long-walker",
+        ).position.x,
+        3,
+    );
+
+    world.assertInternalConsistency();
+    registry.assertInternalConsistency();
+});
+
+test("shared topology mutation is visible to every bound domain", () => {
+    const topology =
+        new Navigation();
+    const registry =
+        new NavigationRegistry();
+
+    topology.addNode({
+        id: "a",
+        x: 0,
+        y: 0,
+    });
+    topology.addNode({
+        id: "b",
+        x: 1,
+        y: 0,
+    });
+    topology.addRoad({
+        id: "doorway",
+        from: "a",
+        to: "b",
+    });
+
+    registry.registerTopology(
+        "room",
+        topology,
+    );
+    registry.bindDomain(
+        "room-1",
+        "room",
+    );
+    registry.bindDomain(
+        "room-2",
+        "room",
+    );
+
+    topology.setRoadEnabled(
+        "doorway",
+        false,
+    );
+
+    for (
+        const domainId of
+        ["room-1", "room-2"]
+    ) {
+        assert.equal(
+            registry
+                .navigationForDomain(
+                    domainId,
+                )
+                .findRoute(
+                    "a",
+                    "b",
+                    { speed: 1 },
+                ),
+            null,
+        );
+    }
 });
