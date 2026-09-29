@@ -498,11 +498,11 @@ export class World {
             return null;
         }
 
-        const event = {
+        const event = Object.freeze({
             time: this.time,
             type,
             ...data,
-        };
+        });
 
         let queued = false;
 
