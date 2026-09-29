@@ -5,6 +5,7 @@ export {
 export { Navigation } from "./world/navigation.js";
 export {
     NavigationRegistry,
+    NavigationInstance,
 } from "./world/navigation-registry.js";
 
 export {
