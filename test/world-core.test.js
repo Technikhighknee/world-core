@@ -2028,6 +2028,7 @@ test("package self-reference exposes only the intended public API", async () => 
     assert.deepEqual(
         Object.keys(api).sort(),
         [
+            "DEFAULT_WORLD_DOMAIN_ID",
             "MOBILITY_PROFILES",
             "Navigation",
             "WORLD_CORE_SNAPSHOT_VERSION",
