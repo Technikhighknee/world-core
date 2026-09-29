@@ -1123,6 +1123,7 @@ export class Navigation {
         {
             blocked = false,
             costMultiplier = 1,
+            traversalDelaySeconds = 0,
         } = {},
     ) {
         if (!effectId) {
@@ -1139,6 +1140,17 @@ export class Navigation {
         ) {
             throw new Error(
                 "Road effect costMultiplier must be finite and greater than or equal to 1",
+            );
+        }
+
+        if (
+            !Number.isFinite(
+                traversalDelaySeconds,
+            ) ||
+            traversalDelaySeconds < 0
+        ) {
+            throw new Error(
+                "Road effect traversalDelaySeconds must be finite and greater than or equal to 0",
             );
         }
 
@@ -1167,6 +1179,7 @@ export class Navigation {
         const next = {
             blocked: Boolean(blocked),
             costMultiplier,
+            traversalDelaySeconds,
         };
         const previous =
             effects.get(effectId);
@@ -1176,7 +1189,9 @@ export class Navigation {
             previous.blocked ===
                 next.blocked &&
             previous.costMultiplier ===
-                next.costMultiplier
+                next.costMultiplier &&
+            previous.traversalDelaySeconds ===
+                next.traversalDelaySeconds
         ) {
             return false;
         }
@@ -1315,6 +1330,111 @@ export class Navigation {
         }
 
         return multiplier;
+    }
+
+    roadTraversalDelaySeconds(
+        roadOrId,
+        runtime = null,
+    ) {
+        const road =
+            typeof roadOrId === "string"
+                ? this.roads.get(
+                    roadOrId,
+                )
+                : roadOrId;
+
+        if (!road) return Infinity;
+
+        let delay = 0;
+        const effects =
+            this.roadEffects.get(
+                road.id,
+            );
+
+        if (effects) {
+            for (
+                const effect of
+                effects.values()
+            ) {
+                delay +=
+                    effect.traversalDelaySeconds ??
+                    0;
+            }
+        }
+
+        if (
+            runtime?.roadTraversalDelaySeconds
+        ) {
+            const runtimeDelay =
+                runtime.roadTraversalDelaySeconds(
+                    road,
+                );
+
+            if (
+                !Number.isFinite(
+                    runtimeDelay,
+                ) ||
+                runtimeDelay < 0
+            ) {
+                return Infinity;
+            }
+
+            delay += runtimeDelay;
+        }
+
+        return delay;
+    }
+
+    roadTravelSeconds(
+        roadOrId,
+        mobility,
+        runtime = null,
+        distanceOverride = null,
+    ) {
+        const road =
+            typeof roadOrId === "string"
+                ? this.roads.get(
+                    roadOrId,
+                )
+                : roadOrId;
+
+        if (!road) return Infinity;
+
+        const speed =
+            roadSurfaceSpeed(
+                road,
+                mobility,
+            );
+        const multiplier =
+            this.roadCostMultiplier(
+                road,
+                runtime,
+            );
+        const delay =
+            this.roadTraversalDelaySeconds(
+                road,
+                runtime,
+            );
+        const travelDistance =
+            distanceOverride == null
+                ? road.length
+                : distanceOverride;
+
+        if (
+            !(speed > 0) ||
+            !Number.isFinite(multiplier) ||
+            !Number.isFinite(delay) ||
+            !(travelDistance >= 0)
+        ) {
+            return Infinity;
+        }
+
+        return (
+            travelDistance /
+                speed *
+                multiplier +
+            delay
+        );
     }
 
     canTraverseRoad(
@@ -1753,11 +1873,11 @@ export class Navigation {
             if (!baseRoute) return;
 
             const partialSeconds =
-                partialDistance /
-                speed *
-                this.roadCostMultiplier(
+                this.roadTravelSeconds(
                     road,
+                    mobility,
                     runtime,
+                    partialDistance,
                 );
 
             const totalSeconds =
@@ -1857,7 +1977,11 @@ export class Navigation {
                 const speed = roadSurfaceSpeed(road, mobility);
                 if (!(speed > 0)) continue;
                 const nextCost = currentCost +
-                    road.length / speed * this.roadCostMultiplier(road, runtime);
+                    this.roadTravelSeconds(
+                        road,
+                        mobility,
+                        runtime,
+                    );
                 const known = costs.get(edge.to) ?? Infinity;
                 if (nextCost >= known - EPSILON) continue;
                 costs.set(edge.to, nextCost);
@@ -1909,15 +2033,26 @@ export class Navigation {
             const speed = roadSurfaceSpeed(road, mobility);
             if (!(speed > 0)) return;
             const entrySeconds = distance(position, hit.point) / mobility.speed;
-            const multiplier = this.roadCostMultiplier(road, runtime);
             merge(
                 this.findRouteCostsToMany(road.to, targets, mobility, runtime),
-                entrySeconds + (road.length - hit.distanceAlong) / speed * multiplier,
+                entrySeconds +
+                    this.roadTravelSeconds(
+                        road,
+                        mobility,
+                        runtime,
+                        road.length - hit.distanceAlong,
+                    ),
             );
             if (road.bidirectional) {
                 merge(
                     this.findRouteCostsToMany(road.from, targets, mobility, runtime),
-                    entrySeconds + hit.distanceAlong / speed * multiplier,
+                    entrySeconds +
+                        this.roadTravelSeconds(
+                            road,
+                            mobility,
+                            runtime,
+                            hit.distanceAlong,
+                        ),
                 );
             }
         };
@@ -1989,7 +2124,11 @@ export class Navigation {
                 if (!road || !this.canTraverseRoad(road, mobility, runtime)) continue;
                 const speed = roadSurfaceSpeed(road, mobility);
                 const nextCost = currentCost +
-                    road.length / speed * this.roadCostMultiplier(road, runtime);
+                    this.roadTravelSeconds(
+                        road,
+                        mobility,
+                        runtime,
+                    );
                 const known = costs.get(edge.to) ?? Infinity;
                 const prev = previous.get(edge.to);
                 const lexical = Math.abs(nextCost-known) <= EPSILON &&
@@ -2065,8 +2204,13 @@ export class Navigation {
             const consider = (endpointNodeId, reversed, partialDistance) => {
                 const route = this.findRouteToAny(endpointNodeId, targets, mobility, runtime);
                 if (!route) return;
-                const partialSeconds = partialDistance / speed *
-                    this.roadCostMultiplier(road, runtime);
+                const partialSeconds =
+                    this.roadTravelSeconds(
+                        road,
+                        mobility,
+                        runtime,
+                        partialDistance,
+                    );
                 const total = entrySeconds + partialSeconds + route.estimatedSeconds;
                 const candidate = {
                     route,
@@ -3080,12 +3224,11 @@ export class Navigation {
 
                 const nextCost =
                     currentCost +
-                    road.length /
-                        speed *
-                        this.roadCostMultiplier(
-                            road,
-                            runtime,
-                        );
+                    this.roadTravelSeconds(
+                        road,
+                        mobility,
+                        runtime,
+                    );
 
                 const knownCost =
                     costs.get(edge.to) ??
@@ -3470,10 +3613,9 @@ export class Navigation {
                         mobility,
                     );
                 const segmentCost =
-                    road.length /
-                    speed *
-                    this.roadCostMultiplier(
+                    this.roadTravelSeconds(
                         road,
+                        mobility,
                         runtime,
                     );
                 const nextCost =
@@ -3733,12 +3875,11 @@ export class Navigation {
 
                 const nextCost =
                     currentCost +
-                    road.length /
-                        speed *
-                        this.roadCostMultiplier(
-                            road,
-                            runtime,
-                        );
+                    this.roadTravelSeconds(
+                        road,
+                        mobility,
+                        runtime,
+                    );
 
                 const knownCost =
                     costs.get(edge.to) ?? Infinity;
