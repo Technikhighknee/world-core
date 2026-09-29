@@ -547,6 +547,10 @@ export type NavigationSource =
     | NavigationInstance
     | NavigationRegistry;
 
+export type SerializableNavigationSource =
+    | Navigation
+    | NavigationRegistry;
+
 export interface NavigationOptions {
     spatialCellSize?: number;
     routeCacheSize?: number;
@@ -767,14 +771,14 @@ export interface WorldCoreSnapshot {
 
 export function serializeWorldCore(
     world: World,
-    navigation: NavigationSource,
+    navigation: SerializableNavigationSource,
 ): WorldCoreSnapshot;
 
 export function deserializeWorldCore(
     snapshot: unknown,
 ): {
     world: World;
-    navigation: NavigationSource;
+    navigation: SerializableNavigationSource;
 };
 
 export const WORLD_CORE_SNAPSHOT_VERSION: number;
@@ -796,10 +800,10 @@ export interface WorldCoreStateHashes {
 
 export function computeWorldCoreStateHash(
     world: World,
-    navigation: NavigationSource,
+    navigation: SerializableNavigationSource,
 ): string;
 
 export function computeWorldCoreStateHashes(
     world: World,
-    navigation: NavigationSource,
+    navigation: SerializableNavigationSource,
 ): WorldCoreStateHashes;
