@@ -1816,6 +1816,138 @@ export class Navigation {
         return best;
     }
 
+    findRouteCostsToMany(
+        startNodeId,
+        destinationNodeIds,
+        mobility,
+        runtime = null,
+    ) {
+        const start = this.nodes.get(startNodeId);
+        if (!start) throw new Error(`Unknown start node: ${startNodeId}`);
+        if (!(mobility?.speed > 0)) return new Map();
+
+        const targets = [...new Set(destinationNodeIds ?? [])].sort();
+        const targetSet = new Set();
+        for (const id of targets) {
+            if (!this.nodes.has(id)) throw new Error(`Unknown destination node: ${id}`);
+            targetSet.add(id);
+        }
+        if (targetSet.size === 0) return new Map();
+
+        const remaining = new Set(targetSet);
+        const settled = new Map();
+        const queue = new MinPriorityQueue();
+        const costs = new Map([[startNodeId, 0]]);
+        queue.push(startNodeId, 0, startNodeId);
+
+        while (queue.size > 0 && remaining.size > 0) {
+            const entry = queue.pop();
+            const current = entry.value;
+            const currentCost = costs.get(current);
+            if (currentCost == null || entry.priority > currentCost + EPSILON) continue;
+
+            if (remaining.delete(current)) {
+                settled.set(current, currentCost);
+                if (remaining.size === 0) break;
+            }
+
+            for (const edge of this.adjacency.get(current) ?? []) {
+                const road = this.roads.get(edge.roadId);
+                if (!road || !this.canTraverseRoad(road, mobility, runtime)) continue;
+                const speed = roadSurfaceSpeed(road, mobility);
+                if (!(speed > 0)) continue;
+                const nextCost = currentCost +
+                    road.length / speed * this.roadCostMultiplier(road, runtime);
+                const known = costs.get(edge.to) ?? Infinity;
+                if (nextCost >= known - EPSILON) continue;
+                costs.set(edge.to, nextCost);
+                queue.push(edge.to, nextCost, edge.to);
+            }
+        }
+
+        const result = new Map();
+        for (const id of targets) {
+            const value = settled.get(id);
+            if (value != null) result.set(id, value);
+        }
+        return result;
+    }
+
+    findRouteCostsFromPositionToMany(
+        position,
+        destinationNodeIds,
+        mobility,
+        {
+            nodeTolerance = 0.1,
+            roadTolerance = 0,
+            entryMaxDistance = 0,
+            maxEntryCandidates = 16,
+        } = {},
+        runtime = null,
+    ) {
+        const targets = [...new Set(destinationNodeIds ?? [])].sort();
+        if (targets.length === 0) return new Map();
+
+        const merge = (targetMap, baseSeconds) => {
+            for (const [id, seconds] of targetMap) {
+                const total = baseSeconds + seconds;
+                const known = result.get(id);
+                if (known == null || total < known) result.set(id, total);
+            }
+        };
+        const result = new Map();
+
+        const node = this.nodeAt(position, nodeTolerance);
+        if (node) {
+            merge(this.findRouteCostsToMany(node.id, targets, mobility, runtime), 0);
+            return result;
+        }
+
+        const evaluateRoadHit = hit => {
+            if (!hit || !this.canTraverseRoad(hit.road, mobility, runtime)) return;
+            const road = hit.road;
+            const speed = roadSurfaceSpeed(road, mobility);
+            if (!(speed > 0)) return;
+            const entrySeconds = distance(position, hit.point) / mobility.speed;
+            const multiplier = this.roadCostMultiplier(road, runtime);
+            merge(
+                this.findRouteCostsToMany(road.to, targets, mobility, runtime),
+                entrySeconds + (road.length - hit.distanceAlong) / speed * multiplier,
+            );
+            if (road.bidirectional) {
+                merge(
+                    this.findRouteCostsToMany(road.from, targets, mobility, runtime),
+                    entrySeconds + hit.distanceAlong / speed * multiplier,
+                );
+            }
+        };
+
+        const hit = this.roadAt(position, roadTolerance, { includeDisabled: false });
+        if (hit) {
+            evaluateRoadHit(hit);
+            if (result.size > 0) return result;
+        }
+
+        if (!(entryMaxDistance > 0)) return result;
+        for (const entry of this.findNavigationEntries(
+            position,
+            mobility,
+            { maxDistance: entryMaxDistance, maxEntries: maxEntryCandidates },
+            runtime,
+        )) {
+            if (entry.kind === "node") {
+                merge(
+                    this.findRouteCostsToMany(entry.node.id, targets, mobility, runtime),
+                    entry.distance / mobility.speed,
+                );
+            } else {
+                evaluateRoadHit(entry);
+            }
+        }
+
+        return result;
+    }
+
     findRouteToAny(
         startNodeId,
         destinationNodeIds,
