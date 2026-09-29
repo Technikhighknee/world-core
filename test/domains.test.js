@@ -6,6 +6,8 @@ import {
     Navigation,
     NavigationRegistry,
     World,
+    startJourney,
+    stepSimulation,
     deserializeWorldCore,
     serializeWorldCore,
     validateWorldCoreSnapshot,
@@ -1493,4 +1495,387 @@ test("large bodies in one domain do not inflate spatial broadphase in another", 
     );
 
     world.assertInternalConsistency();
+});
+
+function buildSharedHouseTopology() {
+    const navigation =
+        new Navigation();
+
+    navigation.addNode({
+        id: "entrance",
+        x: 0,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "hall",
+        x: 10,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "side",
+        x: 10,
+        y: 10,
+    });
+    navigation.addNode({
+        id: "bedroom",
+        x: 20,
+        y: 0,
+    });
+
+    navigation.addRoad({
+        id: "entrance-hall",
+        from: "entrance",
+        to: "hall",
+    });
+    navigation.addRoad({
+        id: "hall-bedroom",
+        from: "hall",
+        to: "bedroom",
+    });
+    navigation.addRoad({
+        id: "entrance-side",
+        from: "entrance",
+        to: "side",
+    });
+    navigation.addRoad({
+        id: "side-bedroom",
+        from: "side",
+        to: "bedroom",
+    });
+
+    return navigation;
+}
+
+test("one domain can block a shared-topology road without cloning or mutating the topology", () => {
+    const world = new World();
+    world.addDomain({
+        id: "house-17",
+    });
+    world.addDomain({
+        id: "house-18",
+    });
+
+    const topology =
+        buildSharedHouseTopology();
+    const registry =
+        new NavigationRegistry();
+
+    registry.registerTopology(
+        "small-house",
+        topology,
+    );
+    registry.bindDomain(
+        "house-17",
+        "small-house",
+    );
+    registry.bindDomain(
+        "house-18",
+        "small-house",
+    );
+
+    registry.setDomainRoadEffect(
+        "house-17",
+        "locked-door",
+        "entrance-hall",
+        {
+            blocked: true,
+        },
+    );
+
+    world.addEntity({
+        id: "hans",
+        domainId: "house-17",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+    world.addEntity({
+        id: "anna",
+        domainId: "house-18",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+
+    assert.equal(
+        startJourney(
+            world,
+            registry,
+            "hans",
+            "bedroom",
+        ),
+        true,
+    );
+    assert.equal(
+        startJourney(
+            world,
+            registry,
+            "anna",
+            "bedroom",
+        ),
+        true,
+    );
+
+    assert.deepEqual(
+        world.getEntity("hans")
+            .journey.route.legs
+            .map(leg => leg.roadId),
+        [
+            "entrance-side",
+            "side-bedroom",
+        ],
+    );
+    assert.deepEqual(
+        world.getEntity("anna")
+            .journey.route.legs
+            .map(leg => leg.roadId),
+        [
+            "entrance-hall",
+            "hall-bedroom",
+        ],
+    );
+
+    assert.equal(
+        registry.topologies.size,
+        1,
+    );
+    assert.equal(
+        registry.domainInstances.size,
+        1,
+    );
+    assert.equal(
+        topology.roads
+            .get("entrance-hall")
+            .enabled,
+        true,
+    );
+    assert.equal(
+        topology.roadEffects
+            .has("entrance-hall"),
+        false,
+    );
+
+    registry.assertInternalConsistency();
+});
+
+test("domain navigation override changes invalidate and reroute active journeys", () => {
+    const world = new World();
+    world.addDomain({
+        id: "house",
+    });
+
+    const topology =
+        buildSharedHouseTopology();
+    const registry =
+        new NavigationRegistry();
+
+    registry.registerTopology(
+        "house-layout",
+        topology,
+    );
+    registry.bindDomain(
+        "house",
+        "house-layout",
+    );
+
+    world.addEntity({
+        id: "hans",
+        domainId: "house",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+
+    assert.equal(
+        startJourney(
+            world,
+            registry,
+            "hans",
+            "bedroom",
+        ),
+        true,
+    );
+
+    assert.equal(
+        world.getEntity("hans")
+            .journey.route.legs[0]
+            .roadId,
+        "entrance-hall",
+    );
+
+    registry.setDomainRoadEffect(
+        "house",
+        "door-closed",
+        "entrance-hall",
+        {
+            blocked: true,
+        },
+    );
+
+    stepSimulation(
+        world,
+        registry,
+        1,
+    );
+
+    assert.equal(
+        world.getEntity("hans")
+            .journey.route.legs[0]
+            .roadId,
+        "entrance-side",
+    );
+
+    registry.removeDomainRoadEffect(
+        "house",
+        "door-closed",
+        "entrance-hall",
+    );
+
+    assert.equal(
+        registry.domainInstances
+            .has("house"),
+        false,
+    );
+    assert.strictEqual(
+        registry.navigationForDomain(
+            "house",
+        ),
+        topology,
+    );
+});
+
+test("sparse domain navigation overrides survive v1 snapshot round-trips", () => {
+    const world = new World();
+    world.addDomain({
+        id: "house",
+    });
+
+    const topology =
+        buildSharedHouseTopology();
+    const registry =
+        new NavigationRegistry();
+
+    registry.registerTopology(
+        "house-layout",
+        topology,
+    );
+    registry.bindDomain(
+        "house",
+        "house-layout",
+    );
+    registry.setDomainRoadEffect(
+        "house",
+        "locked",
+        "entrance-hall",
+        {
+            blocked: true,
+            costMultiplier: 3,
+        },
+    );
+
+    world.addEntity({
+        id: "hans",
+        domainId: "house",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+
+    assert.equal(
+        startJourney(
+            world,
+            registry,
+            "hans",
+            "bedroom",
+        ),
+        true,
+    );
+
+    const snapshot =
+        serializeWorldCore(
+            world,
+            registry,
+        );
+
+    assert.equal(
+        snapshot.version,
+        1,
+    );
+    assert.deepEqual(
+        snapshot.navigation
+            .domainRoadEffects,
+        [
+            {
+                domainId: "house",
+                roadId:
+                    "entrance-hall",
+                effectId: "locked",
+                blocked: true,
+                costMultiplier: 3,
+            },
+        ],
+    );
+    assert.equal(
+        validateWorldCoreSnapshot(
+            snapshot,
+        ),
+        true,
+    );
+
+    const restored =
+        deserializeWorldCore(
+            structuredClone(
+                snapshot,
+            ),
+        );
+
+    const restoredNavigation =
+        restored.navigation
+            .navigationForDomain(
+                "house",
+            );
+
+    assert.equal(
+        restored.navigation
+            .domainInstances.size,
+        1,
+    );
+    assert.equal(
+        restoredNavigation
+            .canTraverseRoad(
+                "entrance-hall",
+                {
+                    speed: 1,
+                },
+            ),
+        false,
+    );
+    assert.equal(
+        restored.world
+            .getEntity("hans")
+            .journey.route.legs[0]
+            .roadId,
+        "entrance-side",
+    );
+
+    restored.navigation
+        .assertInternalConsistency();
+    restored.world
+        .assertInternalConsistency();
 });
