@@ -44,6 +44,7 @@ export class World {
         this.eventQueueLimit = 0;
         this.eventOverflowPolicy = "drop-newest";
         this.droppedEventCount = 0;
+        this.eventSubscribers = new Set();
 
         this.configureEventQueue({
             limit: eventQueueLimit,
@@ -374,6 +375,94 @@ export class World {
         }
     }
 
+    subscribeEvents(
+        listener,
+        {
+            onError = null,
+        } = {},
+    ) {
+        if (typeof listener !== "function") {
+            throw new TypeError(
+                "event listener must be a function",
+            );
+        }
+
+        if (
+            onError != null &&
+            typeof onError !== "function"
+        ) {
+            throw new TypeError(
+                "event listener onError must be a function or null",
+            );
+        }
+
+        const subscription = {
+            listener,
+            onError,
+        };
+
+        this.eventSubscribers.add(
+            subscription,
+        );
+
+        let active = true;
+
+        return () => {
+            if (!active) return false;
+            active = false;
+
+            return this.eventSubscribers.delete(
+                subscription,
+            );
+        };
+    }
+
+    #notifyEventSubscribers(event) {
+        if (
+            this.eventSubscribers.size ===
+            0
+        ) {
+            return;
+        }
+
+        const subscriptions = [
+            ...this.eventSubscribers,
+        ];
+
+        for (
+            const subscription of
+            subscriptions
+        ) {
+            if (
+                !this.eventSubscribers.has(
+                    subscription,
+                )
+            ) {
+                continue;
+            }
+
+            try {
+                subscription.listener(
+                    event,
+                );
+            } catch (error) {
+                if (!subscription.onError) {
+                    continue;
+                }
+
+                try {
+                    subscription.onError(
+                        error,
+                        event,
+                    );
+                } catch {
+                    // Event observers are notifications only.
+                    // Observer failures must never alter simulation state.
+                }
+            }
+        }
+    }
+
     #assertEventCapacity(
         additionalEvents,
     ) {
@@ -398,41 +487,14 @@ export class World {
     }
 
     emitEvent(type, data = {}) {
-        if (!this.captureEvents) return null;
+        const hasSubscribers =
+            this.eventSubscribers.size >
+            0;
 
         if (
-            this.events.length >=
-            this.eventQueueLimit
+            !this.captureEvents &&
+            !hasSubscribers
         ) {
-            if (
-                this.eventOverflowPolicy ===
-                "throw"
-            ) {
-                throw new Error(
-                    `Event queue limit exceeded: ${this.eventQueueLimit}`,
-                );
-            }
-
-            this.droppedEventCount++;
-
-            if (
-                this.eventOverflowPolicy ===
-                "drop-newest"
-            ) {
-                return null;
-            }
-
-            if (
-                this.eventQueueLimit === 0
-            ) {
-                return null;
-            }
-
-            this.events.shift();
-        }
-
-        if (this.eventQueueLimit === 0) {
-            this.droppedEventCount++;
             return null;
         }
 
@@ -442,8 +504,81 @@ export class World {
             ...data,
         };
 
-        this.events.push(event);
-        return event;
+        let queued = false;
+
+        if (this.captureEvents) {
+            if (
+                this.events.length >=
+                this.eventQueueLimit
+            ) {
+                if (
+                    this.eventOverflowPolicy ===
+                    "throw"
+                ) {
+                    throw new Error(
+                        `Event queue limit exceeded: ${this.eventQueueLimit}`,
+                    );
+                }
+
+                this.droppedEventCount++;
+
+                if (
+                    this.eventOverflowPolicy ===
+                    "drop-oldest" &&
+                    this.eventQueueLimit >
+                        0
+                ) {
+                    this.events.shift();
+                }
+            }
+
+            if (
+                this.eventQueueLimit >
+                    0 &&
+                !(
+                    this.events.length >=
+                        this.eventQueueLimit &&
+                    this.eventOverflowPolicy ===
+                        "drop-newest"
+                )
+            ) {
+                this.events.push(
+                    event,
+                );
+                queued = true;
+            } else if (
+                this.eventQueueLimit ===
+                0 &&
+                this.events.length ===
+                    0
+            ) {
+                // A zero-capacity queue drops every captured event.
+                // Overflow was already counted above when appropriate.
+                if (
+                    this.droppedEventCount ===
+                    0 ||
+                    this.eventQueueLimit ===
+                        0
+                ) {
+                    // Preserve the prior accounting rule: every emitted
+                    // event against a zero-sized queue counts as dropped.
+                    if (
+                        !(
+                            this.events.length >=
+                            this.eventQueueLimit
+                        )
+                    ) {
+                        this.droppedEventCount++;
+                    }
+                }
+            }
+        }
+
+        this.#notifyEventSubscribers(
+            event,
+        );
+
+        return queued ? event : null;
     }
 
     drainEvents(target = []) {
