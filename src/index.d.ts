@@ -187,6 +187,17 @@ export interface WorldEvent {
     [key: string]: unknown;
 }
 
+export type WorldEventListener = (
+    event: WorldEvent,
+) => void;
+
+export interface WorldEventSubscriptionOptions {
+    onError?: (
+        error: unknown,
+        event: WorldEvent,
+    ) => void;
+}
+
 export type Obstacle =
     | {
         id: EntityId;
@@ -289,6 +300,10 @@ export class World<T extends Entity = Entity> {
     };
     resetDroppedEventCount(): number;
     setEventCapture(enabled: boolean): void;
+    subscribeEvents(
+        listener: WorldEventListener,
+        options?: WorldEventSubscriptionOptions,
+    ): () => boolean;
     emitEvent(type: string, data?: Record<string, unknown>): WorldEvent | null;
     drainEvents(target?: WorldEvent[]): WorldEvent[];
     peekEvents(): WorldEvent[];
