@@ -811,3 +811,186 @@ test("obstacle domains survive v1 snapshot round-trip", () => {
 
     restored.assertInternalConsistency();
 });
+
+
+test("shared navigation registry and active journeys round-trip without topology duplication", async () => {
+    const {
+        startJourney,
+        stepSimulation,
+    } = await import(
+        "../src/index.js"
+    );
+
+    const world =
+        new World();
+    const registry =
+        new NavigationRegistry();
+    const shared =
+        new Navigation();
+
+    shared.addNode({
+        id: "entry",
+        x: 0,
+        y: 0,
+    });
+    shared.addNode({
+        id: "room",
+        x: 10,
+        y: 0,
+    });
+    shared.addRoad({
+        id: "hall",
+        from: "entry",
+        to: "room",
+    });
+
+    registry.registerTopology(
+        "house-layout",
+        shared,
+    );
+
+    for (
+        const domainId of
+        ["house-a", "house-b"]
+    ) {
+        world.addDomain({
+            id: domainId,
+        });
+        registry.bindDomain(
+            domainId,
+            "house-layout",
+        );
+    }
+
+    world.addEntity({
+        id: "hans",
+        domainId: "house-a",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+    world.addEntity({
+        id: "anna",
+        domainId: "house-b",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+
+    startJourney(
+        world,
+        registry,
+        "hans",
+        "room",
+    );
+    startJourney(
+        world,
+        registry,
+        "anna",
+        "room",
+    );
+
+    stepSimulation(
+        world,
+        registry,
+        2,
+    );
+
+    const snapshot =
+        serializeWorldCore(
+            world,
+            registry,
+        );
+
+    assert.equal(
+        snapshot.version,
+        1,
+    );
+    assert.equal(
+        snapshot.navigation.type,
+        "registry",
+    );
+    assert.equal(
+        snapshot.navigation
+            .topologies.length,
+        1,
+    );
+    assert.equal(
+        snapshot.navigation
+            .domainBindings.length,
+        2,
+    );
+    assert.equal(
+        snapshot.routes.length,
+        1,
+    );
+    assert.equal(
+        snapshot.routes[0]
+            .topologyId,
+        "house-layout",
+    );
+
+    assert.equal(
+        validateWorldCoreSnapshot(
+            snapshot,
+        ),
+        true,
+    );
+
+    const restored =
+        deserializeWorldCore(
+            snapshot,
+        );
+
+    assert.ok(
+        restored.navigation instanceof
+            NavigationRegistry,
+    );
+    assert.equal(
+        restored.navigation
+            .topologies.size,
+        1,
+    );
+    assert.equal(
+        restored.navigation
+            .navigationForDomain(
+                "house-a",
+            ),
+        restored.navigation
+            .navigationForDomain(
+                "house-b",
+            ),
+    );
+
+    stepSimulation(
+        restored.world,
+        restored.navigation,
+        20,
+    );
+
+    assert.equal(
+        restored.world
+            .getEntity("hans")
+            .journey,
+        null,
+    );
+    assert.equal(
+        restored.world
+            .getEntity("anna")
+            .journey,
+        null,
+    );
+
+    restored.world
+        .assertInternalConsistency();
+    restored.navigation
+        .assertInternalConsistency();
+});
