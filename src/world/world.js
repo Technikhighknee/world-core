@@ -9,6 +9,8 @@ import { ObstacleField } from "./obstacle-field.js";
 export const DEFAULT_WORLD_DOMAIN_ID = "default";
 
 export class World {
+    #eventSubscribers = new Set();
+
     constructor({
         spatialCellSize = 20,
         obstacleCellSize = spatialCellSize,
@@ -41,7 +43,6 @@ export class World {
 
         this.captureEvents = Boolean(captureEvents);
         this.events = [];
-        this.eventListeners = new Set();
         this.eventQueueLimit = 0;
         this.eventOverflowPolicy = "drop-newest";
         this.droppedEventCount = 0;
@@ -398,24 +399,106 @@ export class World {
         }
     }
 
-    subscribeEvents(listener) {
+    subscribeEvents(
+        listener,
+        {
+            onError = null,
+        } = {},
+    ) {
         if (typeof listener !== "function") {
             throw new TypeError(
                 "World event listener must be a function",
             );
         }
 
-        this.eventListeners.add(listener);
+        if (
+            onError != null &&
+            typeof onError !== "function"
+        ) {
+            throw new TypeError(
+                "World event listener onError must be a function or null",
+            );
+        }
+
+        const subscription = {
+            listener,
+            onError,
+        };
+
+        this.#eventSubscribers.add(
+            subscription,
+        );
 
         let active = true;
         return () => {
             if (!active) return false;
             active = false;
-            return this.eventListeners.delete(listener);
+            return this.#eventSubscribers.delete(
+                subscription,
+            );
         };
     }
 
+    #notifyEventSubscribers(event) {
+        if (
+            this.#eventSubscribers.size ===
+            0
+        ) {
+            return;
+        }
+
+        const subscriptions = [
+            ...this.#eventSubscribers,
+        ];
+
+        for (
+            const subscription of
+            subscriptions
+        ) {
+            if (
+                !this.#eventSubscribers.has(
+                    subscription,
+                )
+            ) {
+                continue;
+            }
+
+            try {
+                subscription.listener(
+                    event,
+                );
+            } catch (error) {
+                if (!subscription.onError) {
+                    continue;
+                }
+
+                try {
+                    subscription.onError(
+                        error,
+                        event,
+                    );
+                } catch {
+                    // Live observers are notifications only.
+                    // Observer failures must never alter world state.
+                }
+            }
+        }
+    }
+
     emitEvent(type, data = {}) {
+        const hasSubscribers =
+            this.#eventSubscribers.size >
+            0;
+
+        if (
+            !this.captureEvents &&
+            !hasSubscribers
+        ) {
+            return null;
+        }
+
+        // Preserve the queue's transactional "throw" contract: an event
+        // that cannot be retained must fail before live observers see it.
         if (
             this.captureEvents &&
             this.eventOverflowPolicy ===
@@ -431,17 +514,19 @@ export class World {
             );
         }
 
-        const event = {
+        const event = Object.freeze({
             time: this.time,
             type,
             ...data,
-        };
+        });
 
-        for (const listener of [...this.eventListeners]) {
-            listener(event);
+        this.#notifyEventSubscribers(
+            event,
+        );
+
+        if (!this.captureEvents) {
+            return null;
         }
-
-        if (!this.captureEvents) return null;
 
         if (
             this.events.length >=
@@ -1573,7 +1658,7 @@ export class World {
             eventQueueSize:
                 this.events.length,
             eventListenerCount:
-                this.eventListeners.size,
+                this.#eventSubscribers.size,
             eventQueueLimit:
                 this.eventQueueLimit,
             droppedEventCount:
