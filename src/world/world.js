@@ -1767,6 +1767,33 @@ export class World {
             );
         }
 
+        const actualDomainCounts =
+            new Map();
+
+        for (
+            const entity of
+            this.entities.values()
+        ) {
+            if (
+                !this.domains.has(
+                    entity.domainId,
+                )
+            ) {
+                throw new Error(
+                    `Entity references unknown world domain: ${String(entity.id)} -> ${entity.domainId}`,
+                );
+            }
+
+            actualDomainCounts.set(
+                entity.domainId,
+                (
+                    actualDomainCounts.get(
+                        entity.domainId,
+                    ) ?? 0
+                ) + 1,
+            );
+        }
+
         let domainEntityCount = 0;
 
         for (
@@ -1789,6 +1816,20 @@ export class World {
                 );
             }
 
+            const actualCount =
+                actualDomainCounts.get(
+                    domainId,
+                ) ?? 0;
+
+            if (
+                domain.entityCount !==
+                actualCount
+            ) {
+                throw new Error(
+                    `World domain entity drift for ${domainId}: ${domain.entityCount} tracked for ${actualCount} entities`,
+                );
+            }
+
             domainEntityCount +=
                 domain.entityCount;
         }
@@ -1800,21 +1841,6 @@ export class World {
             throw new Error(
                 `World domain entity drift: ${domainEntityCount} assigned for ${diagnostics.entityCount} entities`,
             );
-        }
-
-        for (
-            const entity of
-            this.entities.values()
-        ) {
-            if (
-                !this.domains.has(
-                    entity.domainId,
-                )
-            ) {
-                throw new Error(
-                    `Entity references unknown world domain: ${String(entity.id)} -> ${entity.domainId}`,
-                );
-            }
         }
 
         if (
