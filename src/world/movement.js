@@ -261,96 +261,76 @@ export function stopJourney(entity, world = null) {
     world?.unmarkMoving(entity.id);
 }
 
-export function updateMovement(world, navigation, deltaSeconds) {
-    const refreshDynamicLod = world.hasDynamicMovementLod();
-    const reclassify = world.movementReclassifyScratch;
+export function updateMovement(
+    world,
+    navigation,
+    deltaSeconds,
+) {
+    const entities =
+        [...world.movingEntities.values()];
 
-    if (refreshDynamicLod) {
-        reclassify.length = 0;
-    }
+    for (const entity of entities) {
+        const entityId = entity.id;
 
-    world.forEachDueMovementBatch(
-        deltaSeconds,
-        (entities, elapsedSeconds, skipEntityIds) => {
-            for (const entity of entities) {
-                const entityId = entity.id;
+        if (!entity.journey) {
+            world.unmarkMoving(
+                entityId,
+            );
+            continue;
+        }
 
-                if (skipEntityIds?.has(entityId)) continue;
+        const entityNavigation =
+            navigationForEntity(
+                navigation,
+                entity,
+            );
+        const journey =
+            entity.journey;
 
-                if (!entity.journey) {
-                    world.unmarkMoving(entityId);
-                    continue;
-                }
-
-                const entityNavigation =
-                    navigationForEntity(
-                        navigation,
-                        entity,
-                    );
-                const journey = entity.journey;
-
-                if (
-                    journey.validatedGraphRevision !==
-                    entityNavigation.graphRevision
-                ) {
-                    const prefixCurrent =
-                        !journey.prefixLeg ||
-                        entityNavigation.isRouteLegCurrent(
-                            journey.prefixLeg,
-                            entity.mobility,
-                        );
-
-                    const routeCurrent =
-                        entityNavigation.isRouteCurrent(
-                            journey.route,
-                            entity.mobility,
-                            journey.legIndex,
-                        );
-
-                    if (
-                        !prefixCurrent ||
-                        !routeCurrent
-                    ) {
-                        if (
-                            !replanInvalidJourney(
-                                world,
-                                entityNavigation,
-                                entity,
-                            )
-                        ) {
-                            continue;
-                        }
-                    } else {
-                        journey.validatedGraphRevision =
-                            entityNavigation.graphRevision;
-                    }
-                }
-
-                moveEntity(
-                    world,
-                    entityNavigation,
-                    entity,
-                    elapsedSeconds,
+        if (
+            journey.validatedGraphRevision !==
+            entityNavigation.graphRevision
+        ) {
+            const prefixCurrent =
+                !journey.prefixLeg ||
+                entityNavigation.isRouteLegCurrent(
+                    journey.prefixLeg,
+                    entity.mobility,
                 );
 
+            const routeCurrent =
+                entityNavigation.isRouteCurrent(
+                    journey.route,
+                    entity.mobility,
+                    journey.legIndex,
+                );
+
+            if (
+                !prefixCurrent ||
+                !routeCurrent
+            ) {
                 if (
-                    refreshDynamicLod &&
-                    entity.journey &&
-                    entity.simulation?.movementInterval == null
+                    !replanInvalidJourney(
+                        world,
+                        navigation,
+                        entity,
+                    )
                 ) {
-                    reclassify.push(entityId);
+                    continue;
                 }
+            } else {
+                journey.validatedGraphRevision =
+                    entityNavigation.graphRevision;
             }
-        },
-    );
+        }
 
-    if (!refreshDynamicLod) return;
-
-    for (let i = 0; i < reclassify.length; i++) {
-        world.refreshEntityMovementLod(reclassify[i]);
+        moveEntity(
+            world,
+            entityNavigation,
+            entity,
+            deltaSeconds,
+        );
     }
-
-    reclassify.length = 0;
 }
 
 function finishJourney(world, entity) {
@@ -817,7 +797,6 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
             entity,
             x,
             y,
-            false,
         );
     }
 }
