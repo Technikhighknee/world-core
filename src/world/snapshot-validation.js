@@ -837,6 +837,40 @@ export function validateWorldCoreSnapshot(
         },
     );
 
+    for (
+        let index = 0;
+        index < obstacles.length;
+        index++
+    ) {
+        const domainId =
+            obstacles[index]
+                .domainId ??
+            DEFAULT_WORLD_DOMAIN_ID;
+
+        if (
+            typeof domainId !==
+                "string" ||
+            domainId.length === 0
+        ) {
+            fail(
+                `$.world.obstacles[${index}].domainId`,
+                "expected non-empty string",
+            );
+        }
+
+        if (
+            !domainIds.has(
+                "string:" +
+                    domainId,
+            )
+        ) {
+            fail(
+                `$.world.obstacles[${index}].domainId`,
+                "references missing world domain",
+            );
+        }
+    }
+
     const interestPoints =
         requireArray(
             world.interestPoints ?? [],
