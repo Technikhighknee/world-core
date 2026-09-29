@@ -172,50 +172,6 @@ function buildEntryOnlySnapshot() {
     return snapshot;
 }
 
-function buildLodSnapshot() {
-    const navigation =
-        buildNavigation();
-    const world = new World({
-        movementLodTiers: [
-            {
-                maxDistance:
-                    Infinity,
-                interval: 10,
-            },
-        ],
-        interestPoints: [
-            {
-                x: 0,
-                y: 0,
-            },
-        ],
-    });
-
-    world.addEntity({
-        id: "walker",
-        position: {
-            x: 0,
-            y: 0,
-        },
-        mobility:
-            mobilityProfile(
-                "pedestrian",
-            ),
-    });
-
-    startJourney(
-        world,
-        navigation,
-        "walker",
-        "c",
-    );
-
-    return serializeWorldCore(
-        world,
-        navigation,
-    );
-}
-
 test("current snapshot validation accepts canonical journey, prefix, and entry-only states", () => {
     for (
         const snapshot of
