@@ -79,8 +79,8 @@ jobs:
 
       - name: Domain scaling benchmark smoke
         env:
-          DOMAIN_BENCH_DOMAINS: 5000
-          DOMAIN_BENCH_TRANSFERS: 5000
+          DOMAIN_BENCH_DOMAINS: 50000
+          DOMAIN_BENCH_TRANSFERS: 50000
         run: npm run bench:domains
 
       - name: Retention benchmark smoke
