@@ -1261,3 +1261,128 @@ test("unbound domains do not silently inherit the first registered topology", ()
         null,
     );
 });
+
+
+test("failed domain transfer leaves entity and spatial state unchanged", async () => {
+    const {
+        startJourney,
+    } = await import(
+        "../src/index.js"
+    );
+
+    const world =
+        new World({
+            captureEvents: true,
+            eventQueueLimit: 1,
+            eventOverflowPolicy:
+                "throw",
+        });
+    const navigation =
+        new Navigation();
+
+    world.addDomain({
+        id: "inside",
+    });
+
+    navigation.addNode({
+        id: "a",
+        x: 0,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "b",
+        x: 10,
+        y: 0,
+    });
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+    });
+
+    world.addEntity({
+        id: "hans",
+        position: {
+            x: 0,
+            y: 0,
+        },
+        mobility: {
+            speed: 1,
+        },
+    });
+
+    assert.equal(
+        startJourney(
+            world,
+            navigation,
+            "hans",
+            "b",
+        ),
+        true,
+    );
+
+    assert.equal(
+        world.peekEvents().length,
+        1,
+    );
+
+    const before =
+        structuredClone(
+            world.getEntity(
+                "hans",
+            ),
+        );
+
+    assert.throws(
+        () =>
+            world.transferEntity(
+                "hans",
+                {
+                    domainId:
+                        "inside",
+                    position: {
+                        x: 3,
+                        y: 4,
+                    },
+                },
+            ),
+        /Event queue limit exceeded/,
+    );
+
+    const after =
+        world.getEntity("hans");
+
+    assert.equal(
+        after.domainId,
+        before.domainId,
+    );
+    assert.deepEqual(
+        after.position,
+        before.position,
+    );
+    assert.deepEqual(
+        after.journey,
+        before.journey,
+    );
+
+    assert.equal(
+        world.queryRadius(
+            { x: 0, y: 0 },
+            1,
+        )[0].id,
+        "hans",
+    );
+    assert.deepEqual(
+        world.queryRadius(
+            { x: 3, y: 4 },
+            1,
+            {
+                domainId:
+                    "inside",
+            },
+        ),
+        [],
+    );
+
+    world.assertInternalConsistency();
+});
