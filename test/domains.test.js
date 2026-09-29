@@ -1982,6 +1982,23 @@ test("navigation instances stay sparse across many shared-topology domain bindin
         registry.domainInstances.size,
         0,
     );
+
+    assert.equal(
+        registry.setDomainRoadEffect(
+            "house-9999",
+            "neutral",
+            "hall",
+            {
+                blocked: false,
+                costMultiplier: 1,
+            },
+        ),
+        null,
+    );
+    assert.equal(
+        registry.domainInstances.size,
+        0,
+    );
 });
 
 test("snapshot validation rejects domain road overrides against the wrong topology", () => {
