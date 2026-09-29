@@ -77,6 +77,12 @@ jobs:
           GUARDRAIL_FAST: 1
         run: npm run bench:guardrails
 
+      - name: Domain scaling benchmark smoke
+        env:
+          DOMAIN_BENCH_DOMAINS: 5000
+          DOMAIN_BENCH_TRANSFERS: 5000
+        run: npm run bench:domains
+
       - name: Retention benchmark smoke
         env:
           CHURN_CITIES: 2
