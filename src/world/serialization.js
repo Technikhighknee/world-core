@@ -131,6 +131,8 @@ function serializeNavigation(navigation) {
                                 effect.blocked,
                             costMultiplier:
                                 effect.costMultiplier,
+                            traversalDelaySeconds:
+                                effect.traversalDelaySeconds ?? 0,
                         }),
                     ),
             version: road.version,
@@ -209,6 +211,8 @@ function deserializeNavigation(data) {
                         effect.blocked,
                     costMultiplier:
                         effect.costMultiplier,
+                    traversalDelaySeconds:
+                        effect.traversalDelaySeconds ?? 0,
                 },
             );
         }
@@ -314,6 +318,8 @@ function serializeNavigationSource(
                                                         effect.blocked,
                                                     costMultiplier:
                                                         effect.costMultiplier,
+                                                    traversalDelaySeconds:
+                                                        effect.traversalDelaySeconds ?? 0,
                                                 }),
                                             ),
                                 ),
@@ -381,6 +387,8 @@ function deserializeNavigationSource(
                     effect.blocked,
                 costMultiplier:
                     effect.costMultiplier,
+                traversalDelaySeconds:
+                    effect.traversalDelaySeconds ?? 0,
             },
         );
     }
