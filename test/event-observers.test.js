@@ -198,3 +198,60 @@ test("live observers cannot mutate shared event envelopes", () => {
         }],
     );
 });
+
+
+test("entity removal emits a live lifecycle event without capture", () => {
+    const world = new World();
+    world.addEntity({
+        id: "gone",
+        position: { x: 1, y: 2 },
+    });
+
+    const seen = [];
+    world.subscribeEvents(
+        event => seen.push(event),
+    );
+
+    assert.equal(
+        world.removeEntity("gone"),
+        true,
+    );
+    assert.deepEqual(
+        seen.map(event => ({
+            type: event.type,
+            entityId: event.entityId,
+            domainId: event.domainId,
+        })),
+        [{
+            type: "entityRemoved",
+            entityId: "gone",
+            domainId: "default",
+        }],
+    );
+    assert.equal(
+        world.getEntity("gone"),
+        undefined,
+    );
+});
+
+test("entity removal reserves throw-policy event capacity before mutation", () => {
+    const world = new World({
+        captureEvents: true,
+        eventQueueLimit: 0,
+        eventOverflowPolicy: "throw",
+    });
+    world.addEntity({
+        id: "retained",
+        position: { x: 0, y: 0 },
+    });
+
+    assert.throws(
+        () => world.removeEntity("retained"),
+        /Event queue limit exceeded/,
+    );
+    assert.ok(
+        world.getEntity("retained"),
+        "failed event reservation must leave the entity intact",
+    );
+    world.assertInternalConsistency();
+});
