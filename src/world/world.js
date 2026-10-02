@@ -862,6 +862,7 @@ export class World {
         const entity = this.entities.get(entityId);
         if (!entity) return false;
 
+        this.#assertEventCapacity(1);
         this.unmarkMoving(entityId);
 
         const domain =
@@ -888,6 +889,16 @@ export class World {
         ) {
             this.#recalculateDomainMaxRadius(
                 domain,
+            );
+        }
+
+        if (removed) {
+            this.emitEvent(
+                "entityRemoved",
+                {
+                    entityId,
+                    domainId: domain.id,
+                },
             );
         }
 
