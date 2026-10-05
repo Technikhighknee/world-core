@@ -353,19 +353,18 @@ Thresholds can be overridden with `GUARDRAIL_*` environment variables. CI uses `
 
 Normal development branches, pull requests and pushes to `main` do not run CI automatically. Repository workflows are `workflow_dispatch` only.
 
-Each active feature branch may have exactly one companion CI branch. For example, `feat/embedded-place-layers` uses `ci/embedded-place-layers`.
+Each repository has exactly one persistent CI branch named `CI`. The same branch is reused for every CI run, regardless of which development branch or commit is being tested.
 
 When a CI run is wanted:
 
-1. Force-update that existing CI branch to the exact current feature-branch head.
-2. On the CI branch only, add one workflow commit that enables a `push` trigger scoped only to that CI branch.
+1. Force-update `CI` to the exact commit that should be tested, discarding any previous CI-only workflow commit.
+2. On `CI` only, add one workflow commit that enables a `push` trigger scoped only to `CI`.
 3. Run and inspect CI.
-4. For the next validation run, reuse the same CI branch: force-update it again to the new feature head, discarding the previous CI-only commit, then add the single CI workflow commit again.
-5. After the feature branch is merged, delete its CI branch.
+4. For the next validation run, repeat the process from the new target commit.
 
-Do not create numbered or throwaway CI branches for subsequent runs. Do not merge the CI-only workflow commit into `main`.
+Do not create feature-specific, numbered or throwaway CI branches. Do not merge the CI-only workflow commit into `main` or any development branch. The `CI` branch is persistent and is not deleted after feature merges.
 
-This keeps the tested revision explicit while avoiding one-run-per-commit CI noise and CI-branch sprawl.
+This keeps one stable CI branch per repository while making the tested revision explicit and preventing CI-branch sprawl.
 
 ## TypeScript and consumer example
 
