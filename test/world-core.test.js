@@ -1342,6 +1342,223 @@ test("local congestion slows movement from measured nearby occupancy", () => {
     assert.equal(solo, 2);
 });
 
+test("local steering converges multiple movers onto the same final node", () => {
+    const world = new World({
+        localSteering: {
+            enabled: true,
+        },
+    });
+    const navigation = new Navigation();
+
+    navigation.addNode({
+        id: "a",
+        x: 0,
+        y: 0,
+    });
+    navigation.addNode({
+        id: "b",
+        x: 30,
+        y: 0,
+    });
+    navigation.addRoad({
+        id: "road",
+        from: "a",
+        to: "b",
+        width: 4,
+    });
+
+    const entityIds =
+        Array.from(
+            { length: 6 },
+            (_, index) =>
+                `walker-${index + 1}`,
+        );
+
+    for (const id of entityIds) {
+        world.addEntity({
+            id,
+            kind: "person",
+            position: {
+                x: 0,
+                y: 0,
+            },
+            body: {
+                radius: 0.35,
+            },
+            mobility:
+                mobilityProfile(
+                    "pedestrian",
+                ),
+        });
+
+        assert.equal(
+            startJourney(
+                world,
+                navigation,
+                id,
+                "b",
+            ),
+            true,
+        );
+    }
+
+    const deltaSeconds = 0.25;
+    const maxTicks = 4_000;
+    let ticks = 0;
+
+    while (
+        entityIds.some(
+            id =>
+                world.getEntity(id)
+                    .journey !== null,
+        ) &&
+        ticks < maxTicks
+    ) {
+        stepSimulation(
+            world,
+            navigation,
+            deltaSeconds,
+        );
+        ticks++;
+    }
+
+    assert.ok(
+        ticks < maxTicks,
+        "all movers should reach the shared final node",
+    );
+
+    for (const id of entityIds) {
+        const entity =
+            world.getEntity(id);
+
+        assert.equal(
+            entity.journey,
+            null,
+        );
+        assert.deepEqual(
+            entity.position,
+            {
+                x: 30,
+                y: 0,
+            },
+        );
+    }
+});
+
+test("local steering completes crowded journeys through an angled junction", () => {
+    const world = new World({
+        localSteering: {
+            enabled: true,
+        },
+    });
+    const navigation = new Navigation();
+
+    navigation.addNode({
+        id: "mine-loading",
+        x: 92,
+        y: 168,
+    });
+    navigation.addNode({
+        id: "mine-crossroad",
+        x: 92,
+        y: 178,
+    });
+    navigation.addNode({
+        id: "iron",
+        x: 70,
+        y: 190,
+    });
+
+    navigation.addRoad({
+        id: "loading-road",
+        from: "mine-loading",
+        to: "mine-crossroad",
+        width: 3,
+    });
+    navigation.addRoad({
+        id: "iron-path",
+        from: "mine-crossroad",
+        to: "iron",
+        width: 2,
+    });
+
+    const ids = Array.from(
+        { length: 6 },
+        (_, index) =>
+            `miner-${index + 1}`,
+    );
+
+    for (const id of ids) {
+        world.addEntity({
+            id,
+            kind: "person",
+            position: {
+                x: 92,
+                y: 168,
+            },
+            body: {
+                radius: 0.35,
+            },
+            mobility:
+                mobilityProfile(
+                    "pedestrian",
+                ),
+        });
+
+        assert.equal(
+            startJourney(
+                world,
+                navigation,
+                id,
+                "iron",
+            ),
+            true,
+        );
+    }
+
+    const deltaSeconds = 0.25;
+    const maxTicks = 4_000;
+    let ticks = 0;
+
+    while (
+        ids.some(
+            id =>
+                world.getEntity(id)
+                    .journey !== null,
+        ) &&
+        ticks < maxTicks
+    ) {
+        stepSimulation(
+            world,
+            navigation,
+            deltaSeconds,
+        );
+        ticks++;
+    }
+
+    assert.ok(
+        ticks < maxTicks,
+        "all crowded movers should traverse the angled junction",
+    );
+
+    for (const id of ids) {
+        const entity =
+            world.getEntity(id);
+
+        assert.equal(
+            entity.journey,
+            null,
+        );
+        assert.deepEqual(
+            entity.position,
+            {
+                x: 70,
+                y: 190,
+            },
+        );
+    }
+});
+
 test("entities can opt out of world local steering individually", () => {
     const world = new World({
         localSteering: {
