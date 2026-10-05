@@ -588,6 +588,104 @@ function junctionRadiusForCurrentTarget(
     );
 }
 
+
+function steeringReachedCurrentTarget(
+    road,
+    journey,
+    leg,
+    x,
+    y,
+) {
+    const targetIndex =
+        journey.pointIndex;
+    const previousIndex =
+        leg.reversed
+            ? targetIndex + 1
+            : targetIndex - 1;
+
+    const target =
+        road.points[targetIndex];
+    const previous =
+        road.points[previousIndex];
+
+    if (!target || !previous) {
+        return false;
+    }
+
+    const segmentX =
+        target.x - previous.x;
+    const segmentY =
+        target.y - previous.y;
+    const segmentLength =
+        Math.hypot(
+            segmentX,
+            segmentY,
+        );
+
+    if (segmentLength <= EPSILON) {
+        return true;
+    }
+
+    const remainingLongitudinal =
+        (
+            (target.x - x) *
+                segmentX +
+            (target.y - y) *
+                segmentY
+        ) /
+        segmentLength;
+
+    return (
+        remainingLongitudinal <=
+        EPSILON
+    );
+}
+
+function advanceSteeredTarget(
+    world,
+    navigation,
+    entity,
+    journey,
+    road,
+    leg,
+    target,
+) {
+    const nextIndex =
+        nextPointIndex(
+            journey.pointIndex,
+            leg.reversed,
+        );
+    const completesRoad =
+        pointIndexIsDone(
+            nextIndex,
+            road,
+            leg.reversed,
+        );
+    const completesJourney =
+        completesRoad &&
+        !hasNextLeg(journey);
+
+    if (completesJourney) {
+        world.setEntityPositionXY(
+            entity,
+            target.x,
+            target.y,
+        );
+    }
+
+    journey.pointIndex =
+        nextIndex;
+
+    if (completesRoad) {
+        advanceLeg(
+            world,
+            navigation,
+            entity,
+            journey,
+        );
+    }
+}
+
 function moveEntity(world, navigation, entity, deltaSeconds) {
     let remainingTime = deltaSeconds;
     let x = entity.position.x;
@@ -768,6 +866,35 @@ function moveEntity(world, navigation, entity, deltaSeconds) {
         }
 
         const distanceToTarget = Math.sqrt(distanceSquared);
+
+        if (
+            steeringContext &&
+            steeringReachedCurrentTarget(
+                road,
+                journey,
+                leg,
+                x,
+                y,
+            )
+        ) {
+            advanceSteeredTarget(
+                world,
+                navigation,
+                entity,
+                journey,
+                road,
+                leg,
+                target,
+            );
+
+            if (!entity.journey) {
+                moved = false;
+                break;
+            }
+
+            continue;
+        }
+
         const junctionRadius =
             junctionRadiusForCurrentTarget(
                 navigation,
