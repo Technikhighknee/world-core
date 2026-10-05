@@ -1,10 +1,6 @@
 name: ci
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
   workflow_dispatch:
 
 jobs:
@@ -48,7 +44,6 @@ jobs:
           CHURN_RETENTION_CHECK_EVERY: 10
           CHURN_MEMORY_SAMPLE_EVERY: 5
         run: npm run bench:churn
-
       - name: Steering benchmark smoke
         env:
           STEERING_COUNTS: 50
@@ -56,7 +51,6 @@ jobs:
           STEERING_TICKS: 8
           STEERING_DELTA_SECONDS: 0.1
         run: npm run bench:steering
-
       - name: Determinism soak smoke
         env:
           DETERMINISM_TICKS: 80
@@ -64,7 +58,6 @@ jobs:
           DETERMINISM_HASH_EVERY: 10
           DETERMINISM_SAVE_TICK: 40
         run: npm run bench:determinism
-
       - name: Snapshot benchmark smoke
         env:
           SNAPSHOT_CITIES: 2
@@ -72,25 +65,21 @@ jobs:
           SNAPSHOT_ENTITIES: 200
           SNAPSHOT_MOVERS: 80
         run: npm run bench:snapshot
-
       - name: Performance guardrail harness smoke
         env:
           GUARDRAIL_FAST: 1
         run: npm run bench:guardrails
-
       - name: Domain scaling benchmark smoke
         env:
           DOMAIN_BENCH_DOMAINS: 50000
           DOMAIN_BENCH_TRANSFERS: 50000
         run: npm run bench:domains
-
       - name: Distributed domain movement smoke
         env:
           DOMAIN_MOVE_MOVERS: 500
           DOMAIN_MOVE_DOMAINS: 250
           DOMAIN_MOVE_TICKS: 5
         run: npm run bench:domain-movement
-
       - name: Retention benchmark smoke
         env:
           CHURN_CITIES: 2
