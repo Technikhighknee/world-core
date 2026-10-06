@@ -417,3 +417,9 @@ const route = navigation.findHierarchicalRoute(
 If a consumer wants coarse AI, economy, or background processing, that scheduling policy belongs outside `world-core`. This keeps spatial truth and movement deterministic and avoids assuming that any player or privileged viewpoint exists.
 
 Until world-core has real savegame consumers, the internal snapshot format remains v1 and may evolve without compatibility guarantees.
+
+## License and usage
+
+This project is publicly viewable but is not open source.
+
+No license is granted for reuse, modification, redistribution, or incorporation into other works. All rights are reserved. See [`RIGHTS.md`](RIGHTS.md) for details.
